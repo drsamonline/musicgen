@@ -1,0 +1,21 @@
+{
+  "name": "musicgen",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A pocket generative composer — offline-first PWA that writes, synthesises, masters and exports music in the browser",
+  "license": "MIT",
+  "homepage": "https://drsamonline.github.io/musicgen/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/drsamonline/musicgen.git"
+  },
+  "keywords": ["generative-music", "web-audio", "pwa", "synthesis", "offline-first"],
+  "scripts": {
+    "start": "python3 -m http.server 8080 --directory app",
+    "test": "node tests/unit/run.js",
+    "test:unit": "node tests/unit/run.js",
+    "test:browser": "node tests/browser/test.mjs",
+    "shots": "node scripts/screenshots.mjs"
+  }
+}

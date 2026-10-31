@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#06070b" />
+<title>MusicGen — a pocket generative composer</title>
+<meta name="description" content="A pocket generative composer. Finished-sounding, reproducible, exportable music in one tap. No accounts, no server, no samples. Works offline." />
+<meta property="og:title" content="MusicGen — a pocket generative composer" />
+<meta property="og:description" content="One tap makes a finished-sounding track you can reproduce from a 12-character seed. Runs entirely in your browser, offline." />
+<meta property="og:type" content="website" />
+<link rel="icon" href="app/icons/icon-192.png" />
+<link rel="stylesheet" href="landing.css" />
+</head>
+<body>
+
+<header class="bar">
+  <a class="wordmark" href="./">
+    <span class="mark" aria-hidden="true">
+      <i></i><i></i><i></i><i></i><i></i>
+    </span>
+    MusicGen
+  </a>
+  <nav class="barnav">
+    <a href="#how">How it works</a>
+    <a href="#inside">Inside</a>
+    <a href="#install">Install</a>
+    <a class="ghost" href="https://github.com/drsamonline/musicgen" rel="noopener">GitHub</a>
+    <a class="cta" href="app/">Open the studio →</a>
+  </nav>
+</header>
+
+<main>
+
+  <!-- ---------------------------------------------------------------- hero -->
+  <section class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow">Generative composer · browser native · offline</p>
+      <h1>Music you can<br /><em>regenerate.</em></h1>
+      <p class="lede">
+        One tap composes a finished-sounding track — harmony, melody, drums, mix and master.
+        Every song is a pure function of six presets and a 12-character seed, so a link is a
+        recording. No accounts. No server. No samples.
+      </p>
+      <div class="hero-actions">
+        <a class="btn primary" href="app/">Open the studio</a>
+        <a class="btn" href="#how">Hear it first</a>
+      </div>
+      <ul class="hero-facts">
+        <li><strong>11</strong> styles</li>
+        <li><strong>10</strong> moods</li>
+        <li><strong>7</strong> synth engines</li>
+        <li><strong>0</strong> network requests</li>
+      </ul>
+    </div>
+
+    <!-- live specimen: a real composed song, playable here -->
+    <div class="specimen" id="specimen">
+      <div class="specimen-top">
+        <span class="tag">live specimen</span>
+        <span class="specimen-meta" id="spec-meta">loading…</span>
+      </div>
+      <canvas id="spec-canvas" height="220" aria-label="Piano roll of the demo song"></canvas>
+      <div class="specimen-bottom">
+        <button id="spec-play" class="btn small primary">▶ Play</button>
+        <button id="spec-next" class="btn small">Regenerate</button>
+        <a class="spec-link" id="spec-open" href="app/">take it into the studio →</a>
+      </div>
+      <p class="specimen-note" id="spec-note">Every note below was generated in your browser a moment ago.</p>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- marquee -->
+  <div class="marquee" aria-hidden="true">
+    <div class="marquee-track">
+      <span>Lo-fi</span><span>·</span><span>Cinematic</span><span>·</span><span>EDM</span><span>·</span>
+      <span>Ambient</span><span>·</span><span>Jazz</span><span>·</span><span>Chiptune</span><span>·</span>
+      <span>Trap</span><span>·</span><span>Rock</span><span>·</span><span>Folk</span><span>·</span>
+      <span>Classical</span><span>·</span><span>World</span><span>·</span>
+      <span>Lo-fi</span><span>·</span><span>Cinematic</span><span>·</span><span>EDM</span><span>·</span>
+      <span>Ambient</span><span>·</span><span>Jazz</span><span>·</span><span>Chiptune</span><span>·</span>
+      <span>Trap</span><span>·</span><span>Rock</span><span>·</span><span>Folk</span><span>·</span>
+      <span>Classical</span><span>·</span><span>World</span><span>·</span>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------------------------- how -->
+  <section id="how" class="section">
+    <p class="section-label">01 — how it works</p>
+    <div class="three">
+      <article>
+        <span class="num">01</span>
+        <h3>Choose six dials</h3>
+        <p>Style, mood, theme, tempo, song type and synthesis engine. Lock any of them and
+          the randomiser will respect it.</p>
+      </article>
+      <article>
+        <span class="num">02</span>
+        <h3>It composes, not shuffles</h3>
+        <p>An eleven-stage pipeline builds harmony from a Markov grid, voices it with a
+          voice-leading solver, develops a motif across sections and masters the result.</p>
+      </article>
+      <article>
+        <span class="num">03</span>
+        <h3>Take it somewhere</h3>
+        <p>WAV, per-track stems, Type-1 MIDI, cover art, or a seed link that reproduces the
+          exact same song on someone else's phone.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- inside -->
+  <section id="inside" class="section">
+    <p class="section-label">02 — inside</p>
+    <div class="grid">
+      <article class="card wide">
+        <h3>Deterministic by construction</h3>
+        <p>The composer contains no <code>Math.random</code>, no <code>Date.now</code> and no
+          DOM. Same presets plus same seed produces a byte-identical song — asserted over a
+          hundred runs in the test suite, not just claimed in a README.</p>
+        <p class="mono">compose(presets, seed) → Song</p>
+      </article>
+      <article class="card">
+        <h3>Real synthesis</h3>
+        <p>Subtractive, FM, chiptune pulse, additive, wavetable, Karplus-Strong and noise —
+          plus a drum kit built from oscillators and filtered noise. No audio files ship.</p>
+      </article>
+      <article class="card">
+        <h3>A theory validator, not a dice roll</h3>
+        <p>Every note is checked against the key and the chord sounding under it. Random is
+          sampled through a compatibility table, so it stays musical.</p>
+      </article>
+      <article class="card">
+        <h3>Loudness that holds</h3>
+        <p>An ITU-R BS.1770 implementation runs in the app and in the tests. Exports are
+          normalised to the style's target under a −1 dBTP ceiling.</p>
+      </article>
+      <article class="card wide">
+        <h3>Offline, honestly</h3>
+        <p>The service worker precaches the whole shell and the app makes no runtime requests —
+          no fonts, no analytics, no CDNs. Install it, switch off the network, keep composing.</p>
+        <p class="mono">caches: musicgen-v2 · fetch: cache-first · CSP: default-src 'self'</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- stats -->
+  <section class="section stats">
+    <p class="section-label">03 — the numbers</p>
+    <dl>
+      <div><dt>43 KB</dt><dd>gzipped, whole app</dd></div>
+      <div><dt>330/330</dt><dd>theory-validator cases pass</dd></div>
+      <div><dt>48</dt><dd>automated tests</dd></div>
+      <div><dt>5</dt><dd>export formats</dd></div>
+    </dl>
+  </section>
+
+  <!-- ---------------------------------------------------------------- install -->
+  <section id="install" class="section install">
+    <div>
+      <p class="section-label">04 — install</p>
+      <h2>It installs like an app and behaves like one.</h2>
+      <p>Open the studio, then use your browser's <em>Install</em> or <em>Add to Home Screen</em>.
+        iOS: Share → Add to Home Screen. From then on it launches offline, with its own icon,
+        and keeps playing when you switch apps.</p>
+      <div class="hero-actions">
+        <a class="btn primary" href="app/">Open the studio</a>
+        <a class="btn" href="https://github.com/drsamonline/musicgen/releases" rel="noopener">Download a release</a>
+      </div>
+    </div>
+    <pre class="code"><span class="c"># or run it locally</span>
+git clone https://github.com/drsamonline/musicgen
+cd musicgen/app
+python3 -m http.server 8080
+<span class="c"># → http://localhost:8080</span></pre>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <div>
+    <span class="wordmark small">MusicGen</span>
+    <p>MIT licensed. Built with vanilla ES modules and the Web Audio API. No framework, no build step.</p>
+  </div>
+  <nav>
+    <a href="app/">Studio</a>
+    <a href="https://github.com/drsamonline/musicgen" rel="noopener">Source</a>
+    <a href="https://github.com/drsamonline/musicgen/releases" rel="noopener">Releases</a>
+    <a href="app/qa/matrix.html">Listening matrix</a>
+  </nav>
+</footer>
+
+<script type="module" src="landing.js"></script>
+</body>
+</html>

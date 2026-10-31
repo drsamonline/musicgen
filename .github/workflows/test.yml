@@ -1,0 +1,30 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Unit tests (determinism, theory, export, loudness)
+        run: node tests/unit/run.js
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Chrome for Testing
+        run: npm install --no-save puppeteer@23
+      - name: Browser tests (real Web Audio, offline render, PWA)
+        run: node tests/browser/test.mjs

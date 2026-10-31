@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#07080f" />
+<meta name="description" content="A pocket generative composer. Finished-sounding, reproducible, exportable music in one tap. No accounts, no server, no samples — works offline." />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'none'" />
+<title>MusicGen — generative composer</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<a class="skip" href="#controls">Skip to controls</a>
+
+<main id="app">
+  <header class="topbar">
+    <div class="transport">
+      <button id="play" aria-label="Play or pause">▶</button>
+      <button id="generate" aria-label="Generate song">⟳ Generate</button>
+      <button id="random" aria-label="Random song">Random</button>
+      <button id="evolve" aria-label="Evolve: same presets, new seed">Evolve</button>
+      <button id="mutate" aria-label="Mutate one axis">Mutate</button>
+      <button id="mute" aria-pressed="false" aria-label="Mute">Mute</button>
+      <button id="menu" aria-label="More actions" aria-expanded="false">⋯</button>
+    </div>
+    <div class="songline">
+      <span id="title">—</span>
+      <span id="meta">press Generate</span>
+      <button id="seed" class="chip" title="Copy share link">seed</button>
+    </div>
+    <div class="vizwrap">
+      <canvas id="viz" height="132" aria-label="Song preview: piano roll, spectrum, waveform or generative art"></canvas>
+      <div class="vizmodes" role="group" aria-label="Visualiser mode">
+        <button data-viz="roll" aria-pressed="true">Roll</button>
+        <button data-viz="bars" aria-pressed="false">Bars</button>
+        <button data-viz="wave" aria-pressed="false">Wave</button>
+        <button data-viz="art" aria-pressed="false">Art</button>
+      </div>
+    </div>
+    <div class="progress"><div id="progressbar"></div></div>
+  </header>
+
+  <section id="controls" class="controls" aria-label="Presets">
+    <div class="row">
+      <label for="style">Style</label>
+      <select id="style"></select>
+      <button class="lock" data-lock="style" aria-pressed="false" title="Lock style">🔓</button>
+    </div>
+    <div class="row">
+      <label for="mood">Mood</label>
+      <select id="mood"></select>
+      <button class="lock" data-lock="mood" aria-pressed="false" title="Lock mood">🔓</button>
+    </div>
+    <div class="row">
+      <label for="theme">Theme</label>
+      <select id="theme"></select>
+      <button class="lock" data-lock="theme" aria-pressed="false" title="Lock theme">🔓</button>
+    </div>
+    <div class="row">
+      <label for="bpm">BPM</label>
+      <input id="bpm" type="range" min="40" max="200" step="1" />
+      <output id="bpmout">84</output>
+      <button class="lock" data-lock="bpm" aria-pressed="false" title="Lock tempo">🔓</button>
+    </div>
+    <div class="row">
+      <label for="type">Type</label>
+      <select id="type"></select>
+      <button class="lock" data-lock="type" aria-pressed="false" title="Lock type">🔓</button>
+    </div>
+    <div class="row">
+      <label for="tech">Tech</label>
+      <select id="tech"></select>
+      <button class="lock" data-lock="tech" aria-pressed="false" title="Lock tech">🔓</button>
+    </div>
+
+    <details id="advanced">
+      <summary>Advanced</summary>
+      <div class="row">
+        <label for="timesig">Time</label>
+        <select id="timesig">
+          <option value="4x4">4/4</option>
+          <option value="3x4">3/4</option>
+          <option value="6x8">6/8</option>
+          <option value="5x4">5/4</option>
+          <option value="7x8">7/8</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="intensity">Intensity</label>
+        <input id="intensity" type="range" min="-50" max="50" step="1" value="0" />
+        <output id="intensityout">0</output>
+      </div>
+      <div class="row">
+        <label for="swing">Swing</label>
+        <input id="swing" type="range" min="0" max="60" step="1" value="0" />
+        <output id="swingout">auto</output>
+      </div>
+      <div class="row">
+        <label for="chaos">Chaos</label>
+        <input id="chaos" type="range" min="0" max="100" step="1" value="15" />
+        <output id="chaosout">15%</output>
+      </div>
+      <div class="row">
+        <label for="arp">Arp layer</label>
+        <input id="arp" type="checkbox" />
+      </div>
+      <div class="row">
+        <label for="volume">Volume</label>
+        <input id="volume" type="range" min="0" max="100" step="1" value="90" />
+        <output id="volumeout">90</output>
+      </div>
+    </details>
+  </section>
+
+  <section class="timeline" aria-label="Song sections">
+    <div id="sections" class="sections"></div>
+  </section>
+
+  <section class="actions">
+    <button id="exportwav">Export WAV</button>
+    <button id="exportmidi">MIDI</button>
+    <button id="stems">Stems</button>
+    <button id="art">Cover art</button>
+    <button id="share">Share</button>
+    <button id="save" class="ghost">Save</button>
+  </section>
+
+  <div id="menu-sheet" class="sheet" hidden>
+    <small>Export</small>
+    <button data-act="wav">WAV — 16-bit, normalised to target</button>
+    <button data-act="stems">Stems — one WAV per track (zip)</button>
+    <button data-act="midi">MIDI — Type 1, DAW-ready</button>
+    <button data-act="art">Cover art — 1024 px PNG</button>
+    <div class="sep"></div>
+    <small>Session</small>
+    <button data-act="undo">Undo preset change</button>
+    <button data-act="redo">Redo preset change</button>
+    <button data-act="share">Copy share link</button>
+    <button data-act="library">Library</button>
+    <button data-act="help">Keyboard shortcuts</button>
+    <button data-act="close">Close</button>
+  </div>
+
+  <dialog id="help">
+    <h2>Keyboard</h2>
+    <dl>
+      <dt>Space</dt><dd>Play / pause</dd>
+      <dt>G</dt><dd>Generate</dd>
+      <dt>R</dt><dd>Random</dd>
+      <dt>E</dt><dd>Evolve</dd>
+      <dt>M</dt><dd>Mutate</dd>
+      <dt>U</dt><dd>Mute</dd>
+      <dt>V</dt><dd>Cycle visualiser</dd>
+      <dt>L</dt><dd>Lock / unlock focused control</dd>
+      <dt>1–6</dt><dd>Focus a preset axis</dd>
+      <dt>⌘/Ctrl Z</dt><dd>Undo preset change</dd>
+      <dt>Esc</dt><dd>Stop</dd>
+      <dt>?</dt><dd>This dialog</dd>
+    </dl>
+    <form method="dialog"><button>Close</button></form>
+  </dialog>
+
+  <dialog id="library">
+    <h2>Library</h2>
+    <div id="library-list" class="library-list"></div>
+    <form method="dialog"><button>Close</button></form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <p id="live" class="sr-only" aria-live="polite"></p>
+</main>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

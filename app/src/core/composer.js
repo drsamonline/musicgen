@@ -1,0 +1,582 @@
+// The composer. Pure function of (presets, seed) -> Song.
+// No Math.random, no Date.now, no DOM. Enforced by lint + test.
+import { Rng, gauss } from './rng.js';
+import { euclid, buildMarkov, markovNext, rhythmTree } from './algorithms.js';
+import {
+  SCALES, scaleOf, harmonyScaleOf, degreeToMidi,
+  diatonicChord, chordPcs, chordSymbol, romanNumeral, pc, CHORD_INTERVALS,
+} from './theory.js';
+import { voiceProgression } from './voicing.js';
+import { applyTransform } from './motif.js';
+import { STYLES } from '../presets/styles.js';
+import { MOODS } from '../presets/moods.js';
+import { THEMES } from '../presets/themes.js';
+import { TYPES, SECTION_TRACKS, SECTION_INTENSITY, TYPE_TRACK_MASK } from '../presets/types.js';
+import { TECHS } from '../presets/techs.js';
+
+const TONIC_WEIGHTS = [
+  // C  C# D  D# E  F  F# G  G# A  A# B
+  3, 1, 3, 1, 3, 3, 1, 3, 1, 3, 2, 2,
+];
+
+export const DEFAULT_PRESETS = {
+  style: 'lofi', mood: 'dreamy', theme: 'rain', tech: 'analog',
+  bpm: 84, type: 'full', timeSig: [4, 4],
+  key: null, bars: null, intensityBias: 0, swing: null, chaos: 0.15,
+  arp: false, seed: null,
+};
+
+export function normalisePresets(p) {
+  const out = { ...DEFAULT_PRESETS, ...(p || {}) };
+  if (!STYLES[out.style]) out.style = 'lofi';
+  if (!MOODS[out.mood]) out.mood = 'dreamy';
+  if (!THEMES[out.theme]) out.theme = 'rain';
+  if (!TECHS[out.tech]) out.tech = 'analog';
+  if (!TYPES[out.type]) out.type = 'full';
+  out.bpm = Math.max(40, Math.min(200, Math.round(Number(out.bpm) || 84)));
+  const ts = Array.isArray(out.timeSig) ? out.timeSig : [4, 4];
+  out.timeSig = [Math.max(1, Math.min(12, ts[0] | 0)), ts[1] | 0 || 4];
+  return out;
+}
+
+// ---------------------------------------------------------------- key/mode
+function chooseKey(rng, mood, presets) {
+  if (presets.key && typeof presets.key.tonic === 'number' && SCALES[presets.key.mode]) {
+    return { tonic: ((presets.key.tonic % 12) + 12) % 12, mode: presets.key.mode };
+  }
+  const tonic = rng.weighted([...Array(12).keys()], TONIC_WEIGHTS);
+  const modes = mood.modes;
+  const mode = rng.weighted(modes.map((m) => m[0]), modes.map((m) => m[1]));
+  return { tonic, mode };
+}
+
+// --------------------------------------------------------------- structure
+function buildForm(rng, type, presets) {
+  const form = TYPES[type].form;
+  let sections = form.map(([name, bars], i) => ({ name, bars, index: i }));
+  if (presets.bars) {
+    // scale the form to the requested length, proportionally
+    const total = sections.reduce((a, s) => a + s.bars, 0);
+    const target = Math.max(4, Math.round(presets.bars / 4) * 4);
+    let acc = 0;
+    sections = sections.map((s, i) => {
+      const share = i === sections.length - 1
+        ? target - acc
+        : Math.max(4, Math.round((s.bars / total) * target / 4) * 4);
+      acc += share;
+      return { ...s, bars: share };
+    });
+  }
+  return sections;
+}
+
+// ------------------------------------------------------------- harmony
+function sectionChords(rng, style, mood, section, ctx) {
+  const { tonic, mode, beatsPerBar, prevProg, scaleName } = ctx;
+  const progs = style.progressions;
+  let prog = rng.pick(progs);
+  let guard = 0;
+  while (prevProg && prog.join(',') === prevProg.join(',') && guard++ < 8) prog = rng.pick(progs);
+  // 2nd-order Markov variation over a corpus of the style's progressions
+  if (rng.chance(0.25)) {
+    const table = buildMarkov(progs.map((p) => p.map(String)), 2);
+    const hist = prog.slice(0, 2).map(String);
+    for (let i = 2; i < prog.length; i++) {
+      const nxt = markovNext(table, hist, rng);
+      if (nxt != null) { prog[i] = Number(nxt); hist.push(nxt); }
+    }
+  }
+
+  const seventhChance = Math.max(0, Math.min(1, style.seventhChance + mood.seventhBias));
+  const add9Chance = Math.max(0, Math.min(1, (style.add9Chance ?? 0) + mood.add9Bias));
+  const chords = [];
+  const intensity = section.intensity;
+
+  for (let bar = 0; bar < section.bars; bar++) {
+    const degree = prog[bar % prog.length];
+    const withSeventh = rng.chance(seventhChance + intensity * 0.15);
+    let ch = diatonicChord(tonic, scaleName, degree, withSeventh);
+    // modal interchange: borrowed chords at low probability, gated by mood
+    if (rng.chance(0.06 + Math.max(0, mood.tensionBias) * 0.1)) {
+      const borrowed = [1, 3, 5, 6][rng.int(4)];
+      const b = diatonicChord(tonic, 'aeolian', borrowed, withSeventh);
+      if (b.rootPc !== ch.rootPc) ch = b;
+    }
+    let quality = ch.quality;
+    if (rng.chance(add9Chance) && CHORD_INTERVALS[quality]) {
+      if (quality === 'min7') quality = 'min9';
+      else if (quality === 'maj7') quality = 'maj9';
+      else if (quality === 'dom7') quality = 'dom9';
+      else if (quality === 'maj') quality = 'add9';
+    }
+    if (rng.chance((style.susChance ?? 0) * 0.6) && (quality === 'maj' || quality === 'min')) {
+      quality = quality === 'maj' ? 'sus2' : 'sus4';
+    }
+    chords.push({
+      bar, durBars: 1, degree: ch.degree, rootPc: ch.rootPc, quality,
+      intervals: CHORD_INTERVALS[quality],
+      symbol: chordSymbol({ rootPc: ch.rootPc, quality }),
+      roman: romanNumeral({ degree: ch.degree, quality }),
+    });
+  }
+  return { chords, prog };
+}
+
+// ------------------------------------------------------------- drums
+function resampleGrid(grid, steps) {
+  if (steps === grid.length) return grid.slice();
+  const out = new Array(steps).fill(0);
+  for (let i = 0; i < steps; i++) {
+    const src = Math.round((i / steps) * grid.length) % grid.length;
+    out[i] = grid[src];
+  }
+  return out;
+}
+
+function drumBar(rng, style, intensity, bar, barInSection, sectionBars, steps, ctx) {
+  const out = [];
+  const stepBeats = ctx.beatsPerBar / steps;
+  const groove = style.groove;
+  const density = Math.max(0.15, Math.min(1.2, 0.45 + intensity * 0.7 + ctx.mood.densityBias * 0.5));
+  const kinds = Object.keys(groove);
+  const fillZone = barInSection >= sectionBars - 1 || (barInSection % 4 === 3 && rng.chance(style.fillChance * 0.5));
+
+  for (const kind of kinds) {
+    let grid = resampleGrid(groove[kind], steps);
+    const baseVel = kind === 'kick' ? 1 : kind === 'snare' || kind === 'clap' ? 0.85 : 0.55;
+    if (kind === 'hat') {
+      // euclidean hat layer for non-4/4 and low-intensity sections
+      const pulses = Math.max(2, Math.round(steps * Math.min(1, style.hatDensity * density)));
+      const e = euclid(pulses, steps, rng.int(steps));
+      grid = grid.map((v, i) => (v || (e[i] && rng.chance(0.6)) ? 1 : 0));
+    }
+    for (let i = 0; i < steps; i++) {
+      if (!grid[i]) continue;
+      if (rng.chance(1 - Math.min(1, density)) && kind !== 'kick') continue;
+      let vel = baseVel * (i % 4 === 0 ? 1 : i % 2 === 0 ? 0.78 : 0.62) * (0.75 + intensity * 0.35);
+      if (kind === 'snare' && rng.chance(style.ghostSnare ?? 0)) vel *= 0.35;
+      out.push({ t: ctx.barStart + i * stepBeats, d: stepBeats * 0.9, v: vel, drum: kind });
+    }
+  }
+
+  // fills
+  if (fillZone && intensity > 0.35) {
+    const fillKind = style.groove.tom ? 'tom' : (rng.chance(0.5) ? 'tom' : 'snare');
+    const startStep = Math.max(0, steps - (rng.chance(0.5) ? 8 : 4));
+    const n = steps - startStep;
+    for (let i = 0; i < n; i++) {
+      const prog = i / n;
+      const subdiv = prog < 0.5 ? 2 : 1; // acceleration
+      if (subdiv === 2 && i % 2 === 1) continue;
+      out.push({
+        t: ctx.barStart + (startStep + i) * stepBeats,
+        d: stepBeats * 0.8,
+        v: 0.45 + prog * 0.45,
+        drum: fillKind,
+      });
+    }
+  }
+  return out;
+}
+
+// ------------------------------------------------------------- bass
+function bassBar(rng, style, chord, intensity, ctx) {
+  const { beatsPerBar } = ctx;
+  const out = [];
+  const root = ctx.bassRoot ?? chord.rootPc;
+  const base = 36 + ((root - 36) % 12 + 12) % 12 + (style.bassOctave || 0) + (ctx.mood.register < 0 ? 0 : 0);
+  const rootMidi = base;
+  const fifth = rootMidi + (chord.intervals && chord.intervals[2] != null ? chord.intervals[2] : 7);
+  const pattern = style.bassPattern;
+
+  if (pattern === 'pedal') {
+    out.push({ t: ctx.barStart, d: beatsPerBar * 0.98, p: rootMidi, v: 0.6 + intensity * 0.25 });
+    return out;
+  }
+  if (pattern === 'sub') {
+    out.push({ t: ctx.barStart, d: beatsPerBar * 0.45, p: rootMidi, v: 0.85 });
+    if (beatsPerBar >= 4) out.push({ t: ctx.barStart + 2, d: beatsPerBar * 0.4, p: rootMidi, v: 0.7 });
+    return out;
+  }
+  if (pattern === 'octave') {
+    for (let i = 0; i < beatsPerBar * 2; i++) {
+      const t = i * 0.5;
+      const p = i % 2 === 0 ? rootMidi : rootMidi + 12;
+      out.push({ t: ctx.barStart + t, d: 0.45, p, v: (i % 4 === 0 ? 0.9 : 0.65) * (0.7 + intensity * 0.3) });
+    }
+    return out;
+  }
+  if (pattern === 'walking') {
+    const tones = chordPcs(chord).map((c) => 36 + ((c - 36) % 12 + 12) % 12);
+    const ascending = rng.chance(0.6);
+    for (let b = 0; b < beatsPerBar; b++) {
+      const idx = ascending ? b % tones.length : (tones.length - 1 - (b % tones.length));
+      const p = tones[idx] + 12 * (rng.chance(0.2) ? 1 : 0);
+      out.push({ t: ctx.barStart + b, d: 0.85, p, v: (b === 0 ? 0.85 : 0.6) * (0.75 + intensity * 0.25) });
+    }
+    return out;
+  }
+  if (pattern === 'syncopated') {
+    const steps = beatsPerBar * 4;
+    const g = euclid(Math.max(2, Math.round(steps * 0.28)), steps, rng.int(steps));
+    for (let i = 0; i < steps; i++) {
+      if (!g[i]) continue;
+      const p = i % 8 === 0 ? rootMidi : rng.chance(0.5) ? fifth : rootMidi;
+      out.push({ t: ctx.barStart + i * 0.25, d: 0.22, p, v: (i % 4 === 0 ? 0.9 : 0.6) * (0.7 + intensity * 0.3) });
+    }
+    return out;
+  }
+  // root5th (default)
+  const hits = [[0, rootMidi, 0.9], [beatsPerBar / 2, fifth, 0.7], [beatsPerBar - 1, rootMidi, 0.6]];
+  for (const [t, p, v] of hits) {
+    out.push({ t: ctx.barStart + t, d: Math.min(1, beatsPerBar / 2 - 0.1), p, v: v * (0.7 + intensity * 0.3) });
+  }
+  if (rng.chance(0.3)) {
+    // passing tone on a weak beat
+    const hs = scaleOf(ctx.scaleName);
+    const p = fromDeg(degIndex(rootMidi, ctx.tonic, hs) + 1, ctx.tonic, hs);
+    out.push({ t: ctx.barStart + beatsPerBar - 0.5, d: 0.4, p, v: 0.4 });
+  }
+  return out;
+}
+
+// ------------------------------------------------------------- motif/lead
+function makeMotif(rng, ctx, chord, density) {
+  const { beatsPerBar, tonic, scaleName, mood } = ctx;
+  const scale = scaleOf(scaleName);
+  const steps = Math.round(beatsPerBar * 2);
+  // melody tones are restricted to the key; a borrowed chord's own tones
+  // only get used where they are also diatonic, so a chromatic chord tone
+  // can never be carried into the next bar's harmony.
+  const keyPcs = scale.map((x) => (ctx.tonic + x) % 12);
+  const chordPcsAll = chordPcs(chord);
+  const diatonic = chordPcsAll.filter((c) => keyPcs.includes(c));
+  const chordTones = diatonic.length ? diatonic : chordPcsAll;
+  const out = [];
+  let lastPitch = null;
+  const centre = 60 + mood.register * 5;
+
+  for (let i = 0; i < steps; i++) {
+    const strong = i % 2 === 0;
+    const restChance = (mood.restChance ?? 0.25) * (strong ? 0.55 : 1.25) * (1.25 - density);
+    if (rng.chance(Math.min(0.95, restChance))) { continue; }
+    let p;
+    if (lastPitch == null) {
+      const base = chordTones.map((c) => 60 + ((c - 60) % 12 + 12) % 12);
+      p = base.reduce((a, b) => (Math.abs(b - centre) < Math.abs(a - centre) ? b : a));
+    } else if (strong && rng.chance(0.6)) {
+      // chord tone nearest to the previous note
+      const cands = chordTones.flatMap((c) => {
+        const base = lastPitch - pc(lastPitch) + c;
+        return [base - 12, base, base + 12];
+      });
+      p = cands.reduce((a, b) => (Math.abs(b - lastPitch) <= Math.abs(a - lastPitch) ? b : a));
+    } else {
+      const step = rng.weighted([-2, -1, 1, 2], [1, 3, 3, 1]);
+      p = fromDeg(degIndex(lastPitch, ctx.tonic, scale) + step, ctx.tonic, scale);
+      while (p - lastPitch > 7) p -= 12;
+      while (lastPitch - p > 7) p += 12;
+    }
+    p = clampPitch(p, 48, 88);
+    const dur = mood.staccato > 0.35 && rng.chance(0.5) ? 0.25 : rng.chance(0.25) ? 1 : 0.5;
+    out.push({ t: i * 0.5, d: dur, p, v: (strong ? 0.85 : 0.62) * (0.7 + (mood.velCurve ?? 0.6) * 0.4) });
+    lastPitch = p;
+  }
+  return out;
+}
+function degIndex(midi, tonicPc, scale) {
+  const n = scale.length;
+  const rel = midi - tonicPc;
+  const oct = Math.floor(rel / 12);
+  const within = rel - oct * 12;
+  let best = 0, bd = 99;
+  for (let i = 0; i < n; i++) {
+    const d = Math.abs(scale[i] - within);
+    if (d < bd) { bd = d; best = i; }
+  }
+  return oct * n + best;
+}
+function fromDeg(idx, tonicPc, scale) {
+  const n = scale.length;
+  const oct = Math.floor(idx / n);
+  const i = ((idx % n) + n) % n;
+  return tonicPc + scale[i] + 12 * oct;
+}
+
+function clampPitch(p, lo, hi) {
+  let x = p;
+  while (x < lo) x += 12;
+  while (x > hi) x -= 12;
+  return x;
+}
+
+function leadSection(rng, style, ctx, section, chords) {
+  const out = [];
+  const development = style.development || [];
+  const density = Math.max(0.2, Math.min(1, 0.5 + section.intensity * 0.6 + (ctx.mood.densityBias || 0)));
+  let motif = makeMotif(rng, ctx, chords[0], density);
+  const span = ctx.beatsPerBar;
+
+  for (let bar = 0; bar < section.bars; bar++) {
+    const barStart = ctx.barStart + bar * span;
+    let notes;
+    const isPhraseStart = bar % 4 === 0;
+    if (isPhraseStart) {
+      // new motif or a transform of the previous one
+      if (bar === 0 || rng.chance(0.45)) {
+        motif = makeMotif(rng, ctx, chords[bar % chords.length], density);
+      } else if (development.length) {
+        const name = development[rng.int(development.length)];
+        motif = applyTransform(name, motif, {
+          rng, span, tonicPc: ctx.tonic, scale: ctx.scaleName,
+        });
+      }
+    } else if (rng.chance(0.35) && development.length) {
+      const name = development[rng.int(development.length)];
+      notes = applyTransform(name, motif, { rng, span, tonicPc: ctx.tonic, scale: ctx.scaleName });
+    }
+    const src = notes ?? motif;
+    for (const n of src) {
+      if (n.t < 0 || n.t >= span) continue;
+      // snap chord tones on downbeats of the bar
+      let p = n.p;
+      const chord = chords[bar % chords.length];
+      if (Math.abs(n.t) < 1e-6 && rng.chance(0.7)) {
+        const all = chordPcs(chord);
+        const keyPcs = scaleOf(ctx.scaleName).map((x) => (ctx.tonic + x) % 12);
+        const diat = all.filter((c) => keyPcs.includes(c));
+        const cts = diat.length ? diat : all;
+        let best = p, bd = 99;
+        for (const c of cts) {
+          for (let k = -6; k <= 6; k++) {
+            const cand = p - pc(p) + c + 12 * k;
+            if (Math.abs(cand - p) < bd) { bd = Math.abs(cand - p); best = cand; }
+          }
+        }
+        if (bd <= 2) p = best;
+      }
+      out.push({ ...n, t: barStart + n.t, p: clampPitch(p, 50, 90) });
+    }
+  }
+  return out;
+}
+
+// ------------------------------------------------------------- pad / arp
+function padSection(rng, ctx, section, chords) {
+  const out = [];
+  for (let bar = 0; bar < section.bars; bar++) {
+    const ch = chords[bar % chords.length];
+    const notes = (ch.voicing || []).slice(1).map((p) => p + 12);
+    const start = ctx.barStart + bar * ctx.beatsPerBar;
+    for (const p of notes) {
+      out.push({ t: start, d: ctx.beatsPerBar * 0.99, p, v: 0.35 + section.intensity * 0.2 });
+    }
+  }
+  return out;
+}
+
+function arpSection(rng, ctx, section, chords) {
+  const out = [];
+  const rate = ctx.beatsPerBar >= 4 ? 0.25 : 0.5;
+  for (let bar = 0; bar < section.bars; bar++) {
+    const ch = chords[bar % chords.length];
+    const pcs = chordPcs(ch);
+    const base = 60 + ((pcs[0] - 60) % 12 + 12) % 12;
+    const seq = pcs.map((c) => base + ((c - pc(base) + 12) % 12));
+    const pattern = rng.pick(['up', 'updown', 'down']);
+    let idxs = seq.map((_, i) => i);
+    if (pattern === 'down') idxs.reverse();
+    if (pattern === 'updown') idxs = idxs.concat(idxs.slice(1, -1).reverse());
+    const n = Math.round(ctx.beatsPerBar / rate);
+    for (let i = 0; i < n; i++) {
+      const p = seq[idxs[i % idxs.length]] + (rng.chance(0.15) ? 12 : 0);
+      out.push({ t: ctx.barStart + bar * ctx.beatsPerBar + i * rate, d: rate * 0.9, p, v: 0.3 + section.intensity * 0.3 });
+    }
+  }
+  return out;
+}
+
+// ------------------------------------------------------------- humanise
+function humanise(notes, rng, style, mood) {
+  const swing = style.swing ?? 0;
+  return notes.map((n) => {
+    const beatPos = n.t % 1;
+    const swingShift = Math.abs(beatPos - 0.5) < 1e-6 ? swing * 0.28 : 0;
+    const jitter = gauss(rng) * 0.006;
+    const velJit = 1 + gauss(rng) * 0.06;
+    const lenJit = 1 + gauss(rng) * 0.05;
+    return {
+      ...n,
+      t: Math.max(0, n.t + swingShift + jitter),
+      d: Math.max(0.05, n.d * lenJit),
+      v: Math.max(0.05, Math.min(1, n.v * velJit)),
+    };
+  });
+}
+
+// ------------------------------------------------------------- title
+function makeTitle(rng, theme) {
+  const words = theme.words;
+  const a = rng.pick(words);
+  const b = rng.pick(words);
+  const patterns = [() => a, () => `${a} ${b.toLowerCase()}`, () => `The ${a}`, () => `${a} / ${b}`];
+  let t = rng.pick(patterns)();
+  if (t.length > 28) t = a;
+  return t;
+}
+
+// ============================================================= compose
+export function compose(rawPresets, seed) {
+  const presets = normalisePresets(rawPresets);
+  const style = STYLES[presets.style];
+  const mood = MOODS[presets.mood];
+  const theme = THEMES[presets.theme];
+  const tech = TECHS[presets.tech];
+  const type = TYPES[presets.type];
+
+  const rng = new Rng(seed);
+  const { tonic, mode } = chooseKey(rng.fork('key'), mood, presets);
+  const scaleName = mode;
+  const beatsPerBar = presets.timeSig[0];
+
+  const sections = buildForm(rng.fork('form'), presets.type, presets);
+  const intensityCurve = style.intensity;
+
+  const tracks = { drums: [], bass: [], chords: [], lead: [], pad: [], arp: [] };
+  const songSections = [];
+  let barCursor = 0;
+  let prevProg = null;
+  let prevVoicing = null;
+
+  sections.forEach((sec, si) => {
+    const rngS = rng.fork('section' + si);
+    const base = SECTION_INTENSITY[sec.name] ?? 0.6;
+    const curve = intensityCurve[si % intensityCurve.length];
+    const intensity = Math.max(0, Math.min(1,
+      base * 0.55 + curve * 0.45 + (mood.tensionBias || 0) * 0.4 + (presets.intensityBias || 0)));
+    const section = { name: sec.name, index: si, bar: barCursor, bars: sec.bars, intensity };
+
+    const ctx = {
+      tonic, scaleName, beatsPerBar, mood, barStart: barCursor * beatsPerBar,
+      bassRoot: null,
+    };
+
+    const { chords, prog } = sectionChords(rngS.fork('harmony'), style, mood, section, {
+      tonic, mode, beatsPerBar, prevProg, scaleName,
+    });
+    prevProg = prog;
+
+    const voiced = voiceProgression(
+      chords.map((c) => ({ ...c })),
+      {
+        lo: 52 + (mood.register < 0 ? -4 : 0),
+        hi: 76 + (mood.register > 0 ? 4 : 0),
+        count: style.voiceCount ?? 4,
+        strategy: style.voicing ?? 'close',
+        prev: prevVoicing,
+      },
+    );
+    prevVoicing = voiced[voiced.length - 1]?.voicing ?? prevVoicing;
+    section.chords = voiced.map((c) => ({
+      bar: barCursor + c.bar, rootPc: c.rootPc, quality: c.quality,
+      symbol: c.symbol, roman: c.roman, voicing: c.voicing,
+      pcs: chordPcs(c),
+    }));
+
+    const mask = TYPE_TRACK_MASK[presets.type];
+    let allowed = SECTION_TRACKS[sec.name] || ['drums', 'bass', 'chords', 'lead'];
+    if (mask) allowed = allowed.filter((t) => mask.includes(t));
+    const thin = intensity < 0.32;
+
+    // chords (always, if allowed)
+    if (allowed.includes('chords')) {
+      for (let bar = 0; bar < sec.bars; bar++) {
+        const ch = voiced[bar % voiced.length];
+        const start = (barCursor + bar) * beatsPerBar;
+        const strum = style.id === 'folk' || style.id === 'rock' ? 0.06 : 0.015;
+        ch.voicing.forEach((p, i) => {
+          tracks.chords.push({ t: start + i * strum, d: beatsPerBar * 0.95, p, v: (0.5 + intensity * 0.3) * (i === 0 ? 1 : 0.85) });
+        });
+      }
+    }
+    if (allowed.includes('bass')) {
+      const rngB = rngS.fork('bass');
+      for (let bar = 0; bar < sec.bars; bar++) {
+        const ch = voiced[bar % voiced.length];
+        const bctx = { ...ctx, barStart: (barCursor + bar) * beatsPerBar };
+        tracks.bass.push(...bassBar(rngB, style, ch, intensity, bctx));
+      }
+    }
+    if (allowed.includes('drums') && !thin) {
+      const rngD = rngS.fork('drums');
+      const steps = beatsPerBar * 4;
+      for (let bar = 0; bar < sec.bars; bar++) {
+        const dctx = { ...ctx, barStart: (barCursor + bar) * beatsPerBar, mood };
+        tracks.drums.push(...drumBar(rngD, style, intensity, bar, bar, sec.bars, steps, dctx));
+      }
+    }
+    if (allowed.includes('lead')) {
+      const rngL = rngS.fork('lead');
+      tracks.lead.push(...leadSection(rngL, style, ctx, section, voiced));
+    }
+    if (allowed.includes('pad')) {
+      const rngP = rngS.fork('pad');
+      tracks.pad.push(...padSection(rngP, ctx, section, voiced));
+    }
+    if (presets.arp && allowed.includes('chords')) {
+      const rngA = rngS.fork('arp');
+      tracks.arp.push(...arpSection(rngA, ctx, section, voiced));
+    }
+
+    songSections.push({ ...section, chords: section.chords });
+    barCursor += sec.bars;
+  });
+
+  // humanise each track with its own stream
+  for (const k of Object.keys(tracks)) {
+    if (k === 'drums') {
+      tracks.drums = humanise(tracks.drums, rng.fork('hum-drums'), style, mood);
+    } else {
+      tracks[k] = humanise(tracks[k], rng.fork('hum-' + k), style, mood);
+    }
+    tracks[k].sort((a, b) => a.t - b.t);
+  }
+
+  const totalBars = barCursor;
+  const totalBeats = totalBars * beatsPerBar;
+  const durationSec = (totalBeats / presets.bpm) * 60;
+
+  const fx = {
+    reverb: clamp01((style.fx.reverb ?? 0.3) + (theme.fxBias?.reverb ?? 0)),
+    delay: clamp01((style.fx.delay ?? 0.2) + (theme.fxBias?.delay ?? 0)),
+    chorus: clamp01((style.fx.chorus ?? 0) + (theme.fxBias?.chorus ?? 0)),
+  };
+
+  return {
+    v: 1,
+    seed: String(seed),
+    presets,
+    title: makeTitle(rng.fork('title'), theme),
+    key: { tonic, mode, name: `${['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'][tonic]} ${mode}` },
+    bpm: presets.bpm,
+    timeSig: presets.timeSig,
+    beatsPerBar,
+    bars: totalBars,
+    durationSec,
+    sections: songSections,
+    tracks,
+    fx,
+    mix: { ...style.mix },
+    style: style.id,
+    mood: mood.id,
+    theme: theme.id,
+    tech: tech.id,
+    lufs: style.lufs ?? -14,
+    monoBass: !!style.monoBass,
+    sidechain: !!style.sidechain,
+    palette: theme.palette,
+    totalNotes: Object.values(tracks).reduce((a, t) => a + t.length, 0),
+  };
+}
+
+function clamp01(x) { return Math.max(0, Math.min(1, x)); }

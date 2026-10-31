@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MusicGen — listening matrix (dev)</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 20px; background: #0b0e17; color: #e8ecf7;
+         font: 14px/1.5 system-ui, sans-serif; }
+  h1 { font-size: 18px; }
+  p.hint { color: #97a2bd; max-width: 60ch; }
+  table { border-collapse: collapse; margin-top: 12px; }
+  td, th { border: 1px solid #232c44; padding: 4px 6px; font-size: 12px; text-align: center; }
+  th { color: #97a2bd; font-weight: 500; }
+  button { background: #182034; color: inherit; border: 1px solid #232c44; border-radius: 6px;
+           padding: 5px 8px; cursor: pointer; font: inherit; }
+  button:hover { background: #202a42; }
+  button.playing { border-color: #ff6f9c; }
+  #status { margin-top: 12px; color: #97a2bd; min-height: 1.5em; }
+</style>
+</head>
+<body>
+<h1>Listening matrix</h1>
+<p class="hint">3 styles × 3 moods × 3 seeds = 27 songs. Click any cell to play it. This page is
+dev-only and is not part of the app shell. Run it after every composer change and listen.</p>
+<div id="matrix"></div>
+<div id="status"></div>
+<script type="module">
+import { compose } from '../src/core/composer.js';
+import { validateSong } from '../src/core/validate.js';
+import { Player } from '../src/audio/engine.js';
+import { STYLES } from '../src/presets/styles.js';
+import { MOODS } from '../src/presets/moods.js';
+
+const STYLE_SET = ['lofi', 'edm', 'cinematic'];
+const MOOD_SET = ['calm', 'epic', 'tense'];
+const SEEDS = ['alpha', 'bravo', 'charlie'];
+
+let player = null;
+const status = document.getElementById('status');
+
+const table = document.createElement('table');
+const head = document.createElement('tr');
+head.append(document.createElement('th'));
+for (const mood of MOOD_SET) {
+  const th = document.createElement('th');
+  th.textContent = MOODS[mood].name;
+  head.append(th);
+}
+table.append(head);
+
+for (const style of STYLE_SET) {
+  const tr = document.createElement('tr');
+  const th = document.createElement('th');
+  th.textContent = STYLES[style].name;
+  tr.append(th);
+  for (const mood of MOOD_SET) {
+    const td = document.createElement('td');
+    for (const seed of SEEDS) {
+      const b = document.createElement('button');
+      b.textContent = seed.slice(0, 1).toUpperCase();
+      b.title = `${style} / ${mood} / ${seed}`;
+      b.addEventListener('click', () => playCell(style, mood, seed, b));
+      td.append(b);
+    }
+    tr.append(td);
+  }
+  table.append(tr);
+}
+document.getElementById('matrix').append(table);
+
+async function playCell(style, mood, seed, btn) {
+  document.querySelectorAll('button.playing').forEach((b) => b.classList.remove('playing'));
+  btn.classList.add('playing');
+  const song = compose({ style, mood, theme: 'rain', tech: 'analog', bpm: 100, type: 'full' }, seed);
+  const check = validateSong(song);
+  if (player) await player.close();
+  player = new Player(song);
+  await player.play();
+  status.textContent = `${song.title} — ${song.key.name} — ${song.bpm} BPM — ${song.totalNotes} notes — `
+    + `${check.ok ? 'validator clean' : `validator: ${check.issues.join('; ')}`}`;
+  player.onEnd = () => btn.classList.remove('playing');
+}
+</script>
+</body>
+</html>
