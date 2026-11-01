@@ -64,7 +64,9 @@ for (const c of CASES) {
   await page.goto(`${base}app/`, { waitUntil: 'networkidle0' });
   await new Promise((r) => setTimeout(r, 900));
   const shot = path.join(BASE, `${c.name}.png`);
-  const current = await page.screenshot({ encoding: 'binary' });
+  const shotBytes = await page.screenshot({ encoding: 'binary' });
+  // puppeteer returns a Uint8Array here; pngjs wants a Buffer
+  const current = Buffer.isBuffer(shotBytes) ? shotBytes : Buffer.from(shotBytes);
   await page.close();
 
   if (UPDATE || !fs.existsSync(shot)) {
