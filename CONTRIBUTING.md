@@ -15,11 +15,12 @@ npm test               # 32 unit tests
 npm run test:browser   # 73 tests in real Chromium (needs Chrome + puppeteer)
 npm run lint           # determinism
 npm run budget         # shell size, precache completeness, no external requests
+npm run visual         # pixel-diff the studio against committed baselines
 npm install --no-save axe-core puppeteer
 npm run audit          # axe in dark + light + desktop, plus app checks
 ```
 
-All five must pass. If you changed the composer, also listen: open `app/qa/matrix.html`, play the 27 cells, and say in the PR what you heard that changed.
+All of them must pass — the visual check is the one exception: its baselines are rendered on one machine, so it reports in CI and gates locally. If you changed the composer, also listen: open `app/qa/matrix.html`, play the 27 cells, and say in the PR what you heard that changed.
 
 ## Changing the composer
 
