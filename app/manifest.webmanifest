@@ -88,5 +88,11 @@
   ],
   "launch_handler": {
     "client_mode": "focus-existing"
-  }
+  },
+  "protocol_handlers": [
+    {
+      "protocol": "web+musicgen",
+      "url": "./?url=%s"
+    }
+  ]
 }

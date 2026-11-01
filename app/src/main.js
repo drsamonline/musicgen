@@ -36,6 +36,9 @@ const els = {
   timesig: $('timesig'), intensity: $('intensity'), intensityout: $('intensityout'),
   swing: $('swing'), swingout: $('swingout'), chaos: $('chaos'), chaosout: $('chaosout'),
   arp: $('arp'), lockdrums: $('lockdrums'), locklead: $('locklead'),
+  microtuning: $('microtuning'), settings: $('settings'), settingsDialog: $('settings-dialog'),
+  setTheme: $('set-theme'), setVolume: $('set-volume'), setVolumeOut: $('set-volumeout'),
+  setTarget: $('set-target'), grooveGrid: $('groovegrid'), groovereset: $('groovereset'),
   volume: $('volume'), volumeout: $('volumeout'), reset: $('reset'),
   sections: $('sections'), summary: $('summary'), toast: $('toast'), live: $('live'), notice: $('notice'),
   sheet: $('menu-sheet'), help: $('help'), library: $('library'),
@@ -98,6 +101,7 @@ function syncControls() {
   els.chaos.value = String(Math.round((p.chaos ?? 0.15) * 100));
   els.chaosout.textContent = `${Math.round((p.chaos ?? 0.15) * 100)}%`;
   els.arp.checked = !!p.arp;
+  els.microtuning.checked = !!p.microtuning;
   els.lockdrums.checked = !!p.lockTracks?.drums;
   els.locklead.checked = !!p.lockTracks?.lead;
   els.volume.value = String(Math.round((state.ui.volume ?? 0.9) * 100));
@@ -657,6 +661,35 @@ function wirePresets() {
     emit('ui');
   });
 
+  els.microtuning.addEventListener('change', () => {
+    pushHistory();
+    setPresets({ microtuning: els.microtuning.checked });
+    generate({ announce: false });
+    toast(els.microtuning.checked ? 'Just intonation on' : 'Equal temperament');
+  });
+
+  els.settings.addEventListener('click', openSettings);
+  els.setTheme.addEventListener('change', () => applyTheme(els.setTheme.value));
+  els.setVolume.addEventListener('input', () => {
+    state.ui.volume = Number(els.setVolume.value) / 100;
+    els.setVolumeOut.textContent = els.setVolume.value;
+    els.volume.value = els.setVolume.value;
+    els.volumeout.textContent = els.setVolume.value;
+    applyVolume();
+    emit('ui');
+  });
+  els.setTarget.addEventListener('change', () => {
+    if (els.exporttarget) els.exporttarget.value = els.setTarget.value;
+  });
+
+  els.groovereset.addEventListener('click', () => {
+    pushHistory();
+    setPresets({ grooveOverride: null });
+    renderGroove();
+    generate({ announce: false });
+    toast('Groove reset to the style default');
+  });
+
   els.reset.addEventListener('click', () => {
     pushHistory();
     state.presets = normalisePresets({ ...DEFAULT_PRESETS });
@@ -1019,6 +1052,7 @@ function wireActions() {
     if (act === 'redo') redo();
     if (act === 'library') openLibrary();
     if (act === 'exportlib') exportLibrary();
+    if (act === 'record') toggleRecord();
     if (act === 'install') doInstall();
     if (act === 'help') els.help.showModal();
   });
@@ -1076,6 +1110,92 @@ function wireActions() {
   });
 }
 
+// ------------------------------------------------------------- groove editor
+const GROOVE_KINDS = ['kick', 'snare', 'hat'];
+
+function currentGroove() {
+  const style = STYLES[state.presets.style];
+  const base = state.presets.grooveOverride || style?.groove || {};
+  const out = {};
+  for (const kind of GROOVE_KINDS) {
+    const grid = base[kind] || style?.groove?.[kind] || new Array(16).fill(0);
+    out[kind] = Array.from({ length: 16 }, (_, i) => (grid[Math.round((i / 16) * grid.length)] ? 1 : 0));
+  }
+  return out;
+}
+
+function renderGroove() {
+  if (!els.grooveGrid) return;
+  const groove = currentGroove();
+  els.grooveGrid.innerHTML = '';
+  for (const kind of GROOVE_KINDS) {
+    const row = document.createElement('div');
+    row.className = 'groove-row';
+    const label = document.createElement('span');
+    label.textContent = kind;
+    row.appendChild(label);
+    groove[kind].forEach((on, i) => {
+      const b = document.createElement('button');
+      b.className = 'groove-step';
+      b.type = 'button';
+      b.setAttribute('aria-pressed', String(!!on));
+      b.setAttribute('aria-label', `${kind} step ${i + 1}`);
+      b.addEventListener('click', () => {
+        const next = currentGroove();
+        next[kind][i] = next[kind][i] ? 0 : 1;
+        pushHistory();
+        setPresets({ grooveOverride: next });
+        b.setAttribute('aria-pressed', String(!!next[kind][i]));
+        generate({ announce: false });
+      });
+      row.appendChild(b);
+    });
+    els.grooveGrid.appendChild(row);
+  }
+}
+
+// ------------------------------------------------------------- settings
+function openSettings() {
+  els.setTheme.value = state.ui.theme || 'system';
+  els.setVolume.value = String(Math.round((state.ui.volume ?? 0.9) * 100));
+  els.setVolumeOut.textContent = els.setVolume.value;
+  els.setTarget.value = els.exporttarget?.value ?? 'style';
+  els.settingsDialog.showModal();
+}
+
+// ------------------------------------------------------------- recording
+let recorder = null;
+let recordChunks = [];
+
+async function toggleRecord() {
+  if (recorder && recorder.state === 'recording') {
+    recorder.stop();
+    return;
+  }
+  try {
+    ensurePlayer();
+    if (player.ctx.state === 'suspended') await player.ctx.resume();
+    const dest = player.ctx.createMediaStreamDestination();
+    player.graph.chain.output.connect(dest);
+    const stream = dest.stream;
+    const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((t) => MediaRecorder.isTypeSupported(t));
+    recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    recordChunks = [];
+    recorder.ondataavailable = (e) => { if (e.data.size) recordChunks.push(e.data); };
+    recorder.onstop = () => {
+      const blob = new Blob(recordChunks, { type: recorder.mimeType || 'audio/webm' });
+      download(blob, `${slug(state.song?.title || 'take')}.webm`);
+      toast('Recording saved');
+      try { player.graph.chain.output.disconnect(dest); } catch { /* noop */ }
+    };
+    recorder.start();
+    if (!player.playing) await play();
+    toast('Recording — press Record again to stop');
+  } catch (err) {
+    fail('Recording', err);
+  }
+}
+
 function auditionNote(note) {
   try {
     ensurePlayer();
@@ -1112,6 +1232,7 @@ async function boot() {
   wireActions();
   wireRoll();
   wireInstall();
+  renderGroove();
   subscribe(() => syncControls());
 
   const hash = location.hash.match(/^#s=(.+)$/);

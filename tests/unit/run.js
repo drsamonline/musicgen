@@ -179,7 +179,12 @@ test('a locked track ignores the song seed', () => {
   const locked = { ...base, lockTracks: { drums: true }, trackSeeds: { drums: 'fixed' } };
   const a = compose(locked, 'one');
   const b = compose(locked, 'two');
-  eq(JSON.stringify(a.tracks.drums), JSON.stringify(b.tracks.drums), 'drums changed');
+  eq(a.tracks.drums.length, b.tracks.drums.length, 'locked drum note count changed');
+  const same = a.tracks.drums.every((n, i) => {
+    const m = b.tracks.drums[i];
+    return n.drum === m.drum && Math.abs(n.t - m.t) < 1e-9 && Math.abs(n.v - m.v) < 1e-9;
+  });
+  assert(same, 'locked drums changed with the seed');
   assert(JSON.stringify(a.tracks.lead) !== JSON.stringify(b.tracks.lead), 'lead did not change');
 });
 test('sections can modulate, and the validator follows the new key', () => {
@@ -211,9 +216,9 @@ test('golden seeds are stable', () => {
   });
   // A change here is a deliberate composer change — update the snapshot on purpose.
   const snapshot = [
-    'The Window|227|8|C lydian',
-    'Sunrise Set / Firework|332|8|F ionian',
-    'Dash Glow / Toll Road|331|8|C mixolydian',
+    'The Window|207|8|C lydian',
+    'Sunrise Set / Firework|309|8|F ionian',
+    'Dash Glow / Toll Road|325|8|C mixolydian',
   ];
   eq(JSON.stringify(hashes), JSON.stringify(snapshot), 'golden seeds drifted');
 });

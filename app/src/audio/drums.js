@@ -54,7 +54,28 @@ function toneHit(ctx, dest, when, { peak, from = 150, to = 45, decay = 0.28, att
   return when + attack + decay;
 }
 
-export function drumVoice(ctx, dest, { when, kind, vel = 0.8, engine = 'analog' }) {
+// Metallic hat: six detuned squares, the classic 808 recipe, instead of one
+// noise burst. Only used when the style asks for a "chip" hat.
+function metalHat(ctx, dest, when, vel, decay = 0.05) {
+  const freqs = [205.3, 304.4, 369.6, 522.7, 540, 800];
+  const g = ctx.createGain();
+  decayEnv(g.gain, when, 0.3 * vel, 0.001, decay);
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 8000;
+  bp.Q.value = 0.8;
+  g.connect(bp).connect(dest);
+  for (const f of freqs) {
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.value = f * 6;
+    osc.connect(g);
+    osc.start(when);
+    osc.stop(when + decay + 0.02);
+  }
+}
+
+export function drumVoice(ctx, dest, { when, kind, vel = 0.8, engine = 'analog', metallic = false }) {
   const v = Math.max(0.05, Math.min(1.2, vel));
   switch (kind) {
     case 'kick':
@@ -66,15 +87,21 @@ export function drumVoice(ctx, dest, { when, kind, vel = 0.8, engine = 'analog' 
       toneHit(ctx, dest, when, { peak: 0.4 * v, from: 210, to: 170, decay: 0.1 });
       break;
     case 'hat':
-      noiseHit(ctx, dest, when, { peak: 0.3 * v, type: 'highpass', freq: engine === 'chiptune' ? 4200 : 7200, decay: 0.045 });
+      if (metallic || engine === 'chiptune') {
+        metalHat(ctx, dest, when, v, 0.05);
+      } else {
+        noiseHit(ctx, dest, when, { peak: 0.3 * v, type: 'highpass', freq: 7200, decay: 0.045 });
+      }
       break;
     case 'openhat':
       noiseHit(ctx, dest, when, { peak: 0.26 * v, type: 'highpass', freq: 6800, decay: 0.22 });
       break;
     case 'clap':
-      for (let i = 0; i < 3; i++) {
-        noiseHit(ctx, dest, when + i * 0.012, { peak: 0.4 * v, type: 'bandpass', freq: 1400, q: 1.4, decay: 0.09 });
+      for (let i = 0; i < 4; i++) {
+        noiseHit(ctx, dest, when + i * 0.011, { peak: 0.42 * v, type: 'bandpass', freq: 1200 + i * 180, q: 1.5, decay: 0.08 });
       }
+      // body tail so it reads as a clap and not four ticks
+      noiseHit(ctx, dest, when + 0.044, { peak: 0.24 * v, type: 'bandpass', freq: 1500, q: 0.9, decay: 0.16 });
       break;
     case 'tom':
       toneHit(ctx, dest, when, { peak: 0.6 * v, from: 190, to: 110, decay: 0.2 });
@@ -82,6 +109,8 @@ export function drumVoice(ctx, dest, { when, kind, vel = 0.8, engine = 'analog' 
     case 'rim':
       noiseHit(ctx, dest, when, { peak: 0.3 * v, type: 'bandpass', freq: 2600, q: 6, decay: 0.03 });
       toneHit(ctx, dest, when, { peak: 0.16 * v, from: 800, to: 700, decay: 0.03 });
+      // a second, woodier variant so rim hits are not all identical
+      toneHit(ctx, dest, when + 0.004, { peak: 0.1 * v, from: 1450, to: 1350, decay: 0.02, type: 'triangle' });
       break;
     case 'shaker':
       noiseHit(ctx, dest, when, { peak: 0.2 * v, type: 'highpass', freq: 5200, decay: 0.07 });

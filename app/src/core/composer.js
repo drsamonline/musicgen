@@ -22,7 +22,7 @@ const TONIC_WEIGHTS = [
 // Bump this whenever the composer's output changes for the same inputs.
 // Seeds and share links carry it so an old link can say "this will sound
 // different now" instead of silently lying.
-export const COMPOSER_VERSION = 2;
+export const COMPOSER_VERSION = 3;
 
 export const BPM_MIN = 20;
 export const BPM_MAX = 500;
@@ -144,7 +144,8 @@ function resampleGrid(grid, steps) {
 function drumBar(rng, style, intensity, bar, barInSection, sectionBars, steps, ctx) {
   const out = [];
   const stepBeats = ctx.beatsPerBar / steps;
-  const groove = style.groove;
+  // a user groove override replaces the style template wholesale
+  const groove = ctx.grooveOverride || style.groove;
   const density = Math.max(0.15, Math.min(1.2, 0.45 + intensity * 0.7 + ctx.mood.densityBias * 0.5));
   const kinds = Object.keys(groove);
   const fillZone = barInSection >= sectionBars - 1 || (barInSection % 4 === 3 && rng.chance(style.fillChance * 0.5));
@@ -158,7 +159,10 @@ function drumBar(rng, style, intensity, bar, barInSection, sectionBars, steps, c
       grid = grid.map((v, i) => grid[(i + shift + steps) % steps]);
     }
     const baseVel = kind === 'kick' ? 1 : kind === 'snare' || kind === 'clap' ? 0.85 : 0.55;
-    if (kind === 'hat') {
+    if (kind === 'hat' && ctx.polyrhythm && rng.chance(0.5)) {
+      // polymeter: three against the bar's four
+      grid = euclid(3, steps, 0);
+    } else if (kind === 'hat') {
       // euclidean hat layer for non-4/4 and low-intensity sections
       const pulses = Math.max(2, Math.round(steps * Math.min(1, style.hatDensity * density)));
       const e = euclid(pulses, steps, rng.int(steps));
@@ -483,7 +487,7 @@ export function compose(rawPresets, seed) {
   const sections = buildForm(rng.fork('form'), presets.type, presets);
   const intensityCurve = style.intensity;
 
-  const tracks = { drums: [], bass: [], chords: [], lead: [], pad: [], arp: [] };
+  const tracks = { drums: [], bass: [], chords: [], lead: [], pad: [], arp: [], bed: [] };
   const songSections = [];
   let barCursor = 0;
   let prevProg = null;
@@ -530,6 +534,8 @@ export function compose(rawPresets, seed) {
     const ctx = {
       tonic: sTonic, scaleName, beatsPerBar, mood, barStart: barCursor * beatsPerBar,
       bassRoot: null,
+      grooveOverride: presets.grooveOverride || null,
+      polyrhythm: false, // set per section from the drum stream below
     };
 
     const { chords, prog } = sectionChords(rngS.fork('harmony'), style, mood, section, {
@@ -599,6 +605,8 @@ export function compose(rawPresets, seed) {
     }
     if (allowed.includes('drums') && !thin) {
       const rngD = trackRng('drums', rng.fork('drums'));
+      // decided inside the drum stream so a locked pattern stays locked
+      ctx.polyrhythm = (style.polyrhythm ?? 0) > 0 && rngD.chance(style.polyrhythm);
       const steps = beatsPerBar * 4;
       for (let bar = 0; bar < sec.bars; bar++) {
         const dctx = { ...ctx, barStart: (barCursor + bar) * beatsPerBar, mood };
@@ -620,6 +628,15 @@ export function compose(rawPresets, seed) {
     if (allowed.includes('pad')) {
       const rngP = rngS.fork('pad');
       tracks.pad.push(...padSection(rngP, ctx, section, voiced, section.leadNotes || []));
+    }
+    if ((style.texture ?? 0) > 0 && (allowed.includes('pad') || sec.name === 'drone')) {
+      const level = 0.22 + intensity * 0.2;
+      tracks.bed.push({
+        t: barCursor * beatsPerBar,
+        d: sec.bars * beatsPerBar,
+        p: 48 + sTonic,
+        v: level * (style.texture ?? 0.5),
+      });
     }
     if (presets.arp && allowed.includes('chords')) {
       const rngA = rngS.fork('arp');
@@ -687,9 +704,28 @@ export function compose(rawPresets, seed) {
     monoBass: !!style.monoBass,
     sidechain: !!style.sidechain,
     width: style.width ?? 0.4,
+    variant: presets.variant ?? rng.fork('variant').int(3),
+    tuning: presets.microtuning ? { cents: justIntonationCents(tonic, mode) } : null,
     palette: theme.palette,
     totalNotes: Object.values(tracks).reduce((a, t) => a + t.length, 0),
   };
 }
 
 function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+
+// Just-intonation ratios for a major scale, expressed as cents away from
+// 12-TET so the engine can apply them as a detune per pitch class.
+const JI_RATIOS = [1, 16 / 15, 9 / 8, 6 / 5, 5 / 4, 4 / 3, 45 / 32, 3 / 2, 8 / 5, 5 / 3, 9 / 5, 15 / 8];
+
+export function justIntonationCents(tonic, mode) {
+  const scale = scaleOf(mode);
+  const cents = new Array(12).fill(0);
+  for (let i = 0; i < scale.length; i++) {
+    const semis = scale[i] % 12;
+    const p = (tonic + semis) % 12;
+    // the table is chromatic: index it by semitones, not by scale degree
+    const jiCents = 1200 * Math.log2(JI_RATIOS[semis]);
+    cents[p] = Math.round((jiCents - semis * 100) * 100) / 100;
+  }
+  return cents;
+}

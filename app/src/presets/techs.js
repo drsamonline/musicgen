@@ -62,9 +62,9 @@ export const TECHS = {
   physical: {
     id: 'physical', name: 'Physical',
     instruments: {
-      bass: { ...base, engine: 'ks', damping: 0.3, brightness: 0.5, attack: 0.001, decay: 0.5, sustain: 0.2, release: 0.2, cutoff: 1600, gain: 0.55 },
-      lead: { ...base, engine: 'ks', damping: 0.6, brightness: 0.8, attack: 0.001, decay: 0.8, sustain: 0.1, release: 0.5, cutoff: 4000, gain: 0.32 },
-      chords: { ...base, engine: 'ks', damping: 0.7, brightness: 0.6, attack: 0.001, decay: 0.9, sustain: 0.1, release: 0.6, cutoff: 3000, gain: 0.22 },
+      bass: { ...base, engine: 'waveguide', damping: 0.3, brightness: 0.5, attack: 0.001, decay: 0.5, sustain: 0.2, release: 0.2, cutoff: 1600, gain: 0.55 },
+      lead: { ...base, engine: 'waveguide', damping: 0.6, brightness: 0.8, attack: 0.001, decay: 0.8, sustain: 0.1, release: 0.5, cutoff: 4000, gain: 0.32 },
+      chords: { ...base, engine: 'waveguide', damping: 0.7, brightness: 0.6, attack: 0.001, decay: 0.9, sustain: 0.1, release: 0.6, cutoff: 3000, gain: 0.22 },
       pad: { ...base, engine: 'additive', harmonics: 14, attack: 0.8, decay: 1.2, sustain: 0.6, release: 2, cutoff: 1400, gain: 0.15 },
     },
     drums: { engine: 'analog' },
@@ -75,7 +75,7 @@ export const TECHS = {
       bass: { ...base, engine: 'subtractive', wave: 'sine', attack: 0.3, decay: 0.6, sustain: 0.8, release: 1.2, cutoff: 400, q: 2, gain: 0.5 },
       lead: { ...base, engine: 'additive', harmonics: 6, attack: 0.4, decay: 0.8, sustain: 0.5, release: 1.4, cutoff: 2200, gain: 0.2 },
       chords: { ...base, engine: 'subtractive', wave: 'triangle', attack: 0.5, decay: 0.8, sustain: 0.6, release: 1.4, cutoff: 1200, gain: 0.18 },
-      pad: { ...base, engine: 'noise', attack: 1.2, decay: 1.5, sustain: 0.7, release: 2.5, cutoff: 900, q: 3, gain: 0.22 },
+      pad: { ...base, engine: 'granular', attack: 1.2, decay: 1.5, sustain: 0.7, release: 2.5, cutoff: 900, q: 3, gain: 0.22 },
     },
     drums: { engine: 'analog' },
   },

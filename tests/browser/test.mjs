@@ -266,6 +266,79 @@ try {
     check(`${row.style} does not clip`, row.peak < 0, `${row.peak} dBTP`);
   }
 
+  console.log('\nWorklet engines');
+  const worklets = await page.evaluate(async () => {
+    const { compose } = await import('./src/core/composer.js');
+    const { renderSong, prepareWorklets } = await import('./src/audio/engine.js');
+    const rms = (buf) => {
+      const d = buf.getChannelData(0);
+      let s = 0;
+      for (let i = 0; i < d.length; i++) s += d[i] * d[i];
+      return Math.sqrt(s / d.length);
+    };
+    const out = {};
+    // physical tech → waveguide worklet; noise tech → granular worklet
+    for (const [label, presets] of [
+      ['waveguide', { style: 'folk', mood: 'calm', theme: 'forest', tech: 'physical', bpm: 92, type: 'loop' }],
+      ['granular', { style: 'ambient', mood: 'calm', theme: 'ocean', tech: 'noise', bpm: 60, type: 'loop' }],
+    ]) {
+      const song = compose(presets, `wl-${label}`);
+      const buf = await renderSong(song, { sampleRate: 22050, tailSec: 0.3 });
+      out[label] = { rms: rms(buf), worklets: song.tech };
+    }
+    const ctx = new OfflineAudioContext(1, 128, 22050);
+    const ready = await prepareWorklets(ctx);
+    out.modules = ready;
+    return out;
+  });
+  check('waveguide worklet renders audio', worklets.waveguide.rms > 0.0005, `rms ${worklets.waveguide.rms.toFixed(5)}`);
+  check('granular worklet renders audio', worklets.granular.rms > 0.0005, `rms ${worklets.granular.rms.toFixed(5)}`);
+  check('worklet modules load', worklets.modules.granular && worklets.modules.physical, JSON.stringify(worklets.modules));
+
+  console.log('\nMicrotuning, groove and texture');
+  const extras = await page.evaluate(async () => {
+    const { compose, justIntonationCents } = await import('./src/core/composer.js');
+    const eq = compose({ style: 'lofi', mood: 'calm', theme: 'rain', tech: 'analog', bpm: 84, type: 'loop' }, 'tune');
+    const ji = compose({ style: 'lofi', mood: 'calm', theme: 'rain', tech: 'analog', bpm: 84, type: 'loop', microtuning: true }, 'tune');
+    const cents = ji.tuning?.cents || [];
+
+    const grid = { kick: [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0], snare: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0], hat: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1] };
+    const grooved = compose({ style: 'lofi', mood: 'calm', theme: 'rain', tech: 'analog', bpm: 84, type: 'loop', grooveOverride: grid }, 'groove');
+    const kicks = grooved.tracks.drums.filter((n) => n.drum === 'kick').length;
+    const plain = compose({ style: 'lofi', mood: 'calm', theme: 'rain', tech: 'analog', bpm: 84, type: 'loop' }, 'groove');
+    const plainKicks = plain.tracks.drums.filter((n) => n.drum === 'kick').length;
+
+    const ambient = compose({ style: 'ambient', mood: 'calm', theme: 'ocean', tech: 'noise', bpm: 60, type: 'drone' }, 'bed');
+    return {
+      equalTempered: eq.tuning == null,
+      hasCents: cents.length === 12 && cents.some((c) => Math.abs(c) > 1),
+      centsSample: cents.slice(0, 4).map((c) => +c.toFixed(1)),
+      kicks, plainKicks,
+      bed: ambient.tracks.bed.length,
+      variant: typeof ambient.variant === 'number',
+    };
+  });
+  check('equal temperament by default', extras.equalTempered);
+  check('microtuning produces cents offsets', extras.hasCents, JSON.stringify(extras.centsSample));
+  check('groove override changes the pattern', extras.kicks !== extras.plainKicks, `${extras.kicks} vs ${extras.plainKicks} kicks`);
+  check('ambient songs get a noise bed', extras.bed > 0, `${extras.bed} bed notes`);
+  check('songs carry an instrument variant', extras.variant);
+
+  console.log('\nSettings and groove UI');
+  await page.evaluate(() => document.getElementById('advanced').open = true);
+  await wait(200);
+  const uiBits = await page.evaluate(() => {
+    const steps = document.querySelectorAll('.groove-step').length;
+    document.getElementById('settings').click();
+    const dialogOpen = document.getElementById('settings-dialog').open;
+    const theme = document.getElementById('set-theme').value;
+    document.getElementById('settings-dialog').close();
+    return { steps, dialogOpen, theme };
+  });
+  check('groove editor renders 48 steps', uiBits.steps === 48, String(uiBits.steps));
+  check('settings dialog opens', uiBits.dialogOpen);
+  check('settings shows the current theme', ['system', 'light', 'dark'].includes(uiBits.theme), uiBits.theme);
+
   console.log('\nMix balance');
   const balance = await page.evaluate(async () => {
     const { compose } = await import('./src/core/composer.js');

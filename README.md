@@ -50,7 +50,7 @@ Then use your browser's **Install** / **Add to Home Screen** (iOS: Share → Add
 
 **The presets** — 11 styles, 10 moods, 10 themes, 8 song types, 7 synthesis technologies, plus a compatibility table that maps styles to allowed moods and engines. Tempo runs **20–500 BPM**; per-track locks freeze the drums or the melody while you reroll everything else. Every share link carries the composer version, so an old seed can tell you it will sound different instead of silently lying.
 
-**The synthesis** — subtractive, FM, chiptune (real `PeriodicWave` pulses), additive, wavetable, Karplus-Strong and noise instruments; a drum kit built from oscillators and filtered noise; generated convolution reverb, tempo-synced delay and chorus; glue compressor and limiter on the master, mono bass below 120 Hz, sidechain ducking for EDM, a filter envelope and velocity-to-timbre on every voice, analogue drift, and a stereo-width tap. A voice pool steals the quietest voice with a fade; the scheduler runs a 200 ms lookahead and skips late notes instead of firing them in a burst.
+**The synthesis** — subtractive, FM, chiptune (real `PeriodicWave` pulses), additive, wavetable, Karplus-Strong and noise instruments, plus two **AudioWorklet** engines (granular and a waveguide) with native fallbacks; a drum kit built from oscillators and filtered noise; generated convolution reverb, tempo-synced delay and chorus; glue compressor and limiter on the master, mono bass below 120 Hz, sidechain ducking for EDM, a filter envelope and velocity-to-timbre on every voice, analogue drift, and a stereo-width tap. A voice pool steals the quietest voice with a fade; the scheduler runs a 200 ms lookahead and skips late notes instead of firing them in a burst.
 
 **The exports** — WAV (16/24/32-bit, normalised to a chosen loudness target under a −1 dBTP ceiling), per-track stems as a zip with per-stem loudness in the readme, Type-1 MIDI, full song JSON (export *and* import), 1024 px cover art, and seed links that reproduce the exact song elsewhere.
 
@@ -73,7 +73,7 @@ npm run audit
 
 ```bash
 npm test              # 32 unit tests, no browser needed
-npm run test:browser  # 73 tests in real Chromium with real Web Audio
+npm run test:browser  # 84 tests in real Chromium with real Web Audio
 npm run lint          # determinism lint: no Math.random / Date.now in pure modules
 npm run budget        # shell size, precache completeness, no external requests
 npm run shots         # regenerate docs/screenshots
@@ -86,6 +86,7 @@ The suite asserts, rather than claims:
 - musicality — 330 style × mood × seed cases through the theory validator
 - audio — an offline render measured for silence, clipping and LUFS against the style target
 - exports — WAV byte length, MIDI header and track count, zip archive structure
+- worklets — both processors render audio and the modules load in an offline context
 - tempo — 20 BPM and 500 BPM both compose, render and validate; the range is clamped at both ends
 - audio integrity — a dense render has no silent holes, no voices are dropped, the pool stays inside its cap at 7/8 and 500 BPM
 - loudness regression — three styles rendered offline and checked against their LUFS target and peak ceiling

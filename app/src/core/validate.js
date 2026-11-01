@@ -92,6 +92,20 @@ export function validateSong(song, opts = {}) {
   }
   if (bad > 0) issues.push(`chords: ${bad} notes are not tones of the chord under them`);
 
+  // the bass should not teleport: a leap of more than an octave between
+  // consecutive notes is a mistake in every style, not just jazz
+  // (walking and pedal bass in jazz/classical cross registers on purpose)
+  if (!isJazzOrClassical) {
+    const bassNotes = song.tracks.bass || [];
+    let leaps = 0;
+    for (let i = 1; i < bassNotes.length; i++) {
+      if (Math.abs(bassNotes[i].p - bassNotes[i - 1].p) > 15) leaps++;
+    }
+    if (bassNotes.length > 8 && leaps / bassNotes.length > 0.25) {
+      issues.push(`bass: ${leaps} leaps larger than a tenth`);
+    }
+  }
+
   // parallel fifths / octaves between bass and the chord top voice
   if (isJazzOrClassical) {
     const bass = song.tracks.bass || [];

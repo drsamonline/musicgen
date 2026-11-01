@@ -3,13 +3,57 @@ import { synthVoice, isOffline } from './instruments.js';
 import { drumVoice } from './drums.js';
 import { createFxBuses } from './fx.js';
 import { createMasterChain } from './mastering.js';
-import { freqOf } from '../core/theory.js';
+import { freqOf, pc } from '../core/theory.js';
 import { TECHS } from '../presets/techs.js';
 
-export const TRACK_NAMES = ['drums', 'bass', 'chords', 'lead', 'pad', 'arp'];
+export const TRACK_NAMES = ['drums', 'bass', 'chords', 'lead', 'pad', 'arp', 'bed'];
 
-const TRACK_PAN = { drums: 0, bass: 0, chords: -0.18, lead: 0.22, pad: 0, arp: -0.32 };
-const TRACK_SEND = { drums: 0.12, bass: 0.04, chords: 0.32, lead: 0.4, pad: 0.6, arp: 0.35 };
+const WORKLET_MODULES = ['granular.js', 'physical.js', 'clock.js'];
+const workletReady = new WeakMap();
+
+// Load the AudioWorklet modules once per context. Anything that fails here
+// falls back to native nodes — the app must never depend on a worklet.
+export async function prepareWorklets(ctx) {
+  if (workletReady.has(ctx)) return workletReady.get(ctx);
+  const promise = (async () => {
+    if (!ctx.audioWorklet?.addModule) return { granular: false, physical: false, clock: false };
+    const base = new URL('./worklets/', import.meta.url);
+    const ok = { granular: false, physical: false, clock: false };
+    for (const name of WORKLET_MODULES) {
+      try {
+        await ctx.audioWorklet.addModule(new URL(name, base).href);
+        if (name === 'granular.js') ok.granular = true;
+        if (name === 'physical.js') ok.physical = true;
+        if (name === 'clock.js') ok.clock = true;
+      } catch { /* fall back */ }
+    }
+    return ok;
+  })();
+  workletReady.set(ctx, promise);
+  return promise;
+}
+
+const TRACK_PAN = { drums: 0, bass: 0, chords: -0.18, lead: 0.22, pad: 0, arp: -0.32, bed: 0 };
+const TRACK_SEND = { drums: 0.12, bass: 0.04, chords: 0.32, lead: 0.4, pad: 0.6, arp: 0.35, bed: 0.8 };
+// per-track FX: delay division (in beats), drive, and a tone filter range
+const TRACK_FX = {
+  drums: { delay: 0.25, drive: 0.05 },
+  bass: { delay: 0.25, drive: 0.2 },
+  chords: { delay: 0.5, drive: 0.1 },
+  lead: { delay: 0.75, drive: 0.12 },
+  pad: { delay: 1, drive: 0.05 },
+  arp: { delay: 0.5, drive: 0.08 },
+  bed: { delay: 1, drive: 0 },
+};
+
+// Small per-style instrument tweaks so "Analog" is not one sound forever.
+export function applyVariant(spec, variant) {
+  if (!spec || !variant) return spec;
+  const v = variant % 3;
+  if (v === 0) return spec;
+  if (v === 1) return { ...spec, cutoff: (spec.cutoff ?? 3000) * 1.6, detune: (spec.detune ?? 6) * 1.8, q: (spec.q ?? 1) * 1.3 };
+  return { ...spec, cutoff: (spec.cutoff ?? 3000) * 0.62, detune: Math.max(2, (spec.detune ?? 6) * 0.5), filterEnv: (spec.filterEnv ?? 0.3) * 1.5, sat: (spec.sat ?? 0.15) * 1.4 };
+}
 
 export function voiceCap() {
   const cores = globalThis.navigator?.hardwareConcurrency || 4;
@@ -22,7 +66,7 @@ export function voiceCap() {
 // ---------------------------------------------------------------- graph
 export function buildGraph(ctx, song) {
   const master = ctx.createGain();
-  master.gain.value = 0.55;
+  master.gain.value = 0.32;
 
   const chain = createMasterChain(ctx, song);
 
@@ -84,7 +128,18 @@ export function buildGraph(ctx, song) {
       node = panner;
     }
 
-    const duckable = song.sidechain && (name === 'chords' || name === 'pad' || name === 'arp');
+    // per-track tone filter, automated by the tension curve
+    let tone = null;
+    if (typeof ctx.createBiquadFilter === 'function') {
+      tone = ctx.createBiquadFilter();
+      tone.type = 'lowpass';
+      tone.frequency.value = 16000;
+      tone.Q.value = 0.4;
+      node.connect(tone);
+      node = tone;
+    }
+
+    const duckable = song.sidechain && (name === 'chords' || name === 'pad' || name === 'arp' || name === 'bed');
     node.connect(duckable ? sidechain : master);
 
     // width: a short, opposite-panned delayed tap — cheap stereo
@@ -111,6 +166,25 @@ export function buildGraph(ctx, song) {
     const sendDel = ctx.createGain();
     sendDel.gain.value = (TRACK_SEND[name] ?? 0.2) * 0.6 * (song.fx?.delay ?? 0.2);
     node.connect(sendDel).connect(fx.delIn);
+    // per-track drive
+    const drive = TRACK_FX[name]?.drive ?? 0.1;
+    if (drive > 0.02 && name !== 'bed') {
+      try {
+        const ws = ctx.createWaveShaper();
+        const n = 1024;
+        const curve = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+          const x = (i / (n - 1)) * 2 - 1;
+          curve[i] = Math.tanh(x * (1 + drive * 6));
+        }
+        ws.curve = curve;
+        // compensate so the drive adds colour, not level
+        const comp = ctx.createGain();
+        comp.gain.value = 1 / (1 + drive * 3.2);
+        input.disconnect();
+        input.connect(ws).connect(comp).connect(node === tone ? tone : node);
+      } catch { /* keep the dry path */ }
+    }
 
     if ((song.fx?.chorus ?? 0) > 0.12 && (name === 'pad' || name === 'chords' || name === 'lead')) {
       const sendCh = ctx.createGain();
@@ -118,7 +192,25 @@ export function buildGraph(ctx, song) {
       node.connect(sendCh).connect(fx.chorusIn);
     }
 
-    tracks[name] = { input, panner, gain: input };
+    tracks[name] = { input, panner, gain: input, tone, worklet: null };
+  }
+
+  // worklet voices: one node per track, created only when the tech asks for it
+  for (const name of TRACK_NAMES) {
+    const spec = tech.instruments?.[name];
+    if (!spec) continue;
+    const engine = spec.engine;
+    if (engine !== 'granular' && engine !== 'waveguide') continue;
+    const proc = engine === 'granular' ? 'granular-voice' : 'physical-voice';
+    try {
+      const node = new AudioWorkletNode(ctx, proc, {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+      });
+      node.connect(tracks[name].input);
+      tracks[name].worklet = { node, engine };
+    } catch { /* fall back to native nodes */ }
   }
 
   return {
@@ -187,19 +279,70 @@ function stealQuietest(cap, now, at = now) {
   cap.stolen++;
 }
 
+const BED_SPEC = {
+  engine: 'noise', attack: 1.4, decay: 2, sustain: 0.8, release: 2.4,
+  cutoff: 900, q: 1.2, gain: 0.16,
+};
+
+// Automation envelopes drawn from the tension curve: each section opens the
+// track tone filter and the reverb send as it gets more intense.
+export function applyAutomation(graph, song, t0 = 0, fromSec = 0) {
+  const spb = 60 / (song.bpm || 100);
+  const ctx = graph.ctx;
+  for (const name of TRACK_NAMES) {
+    const t = graph.tracks[name];
+    if (!t?.tone) continue;
+    for (const sec of song.sections) {
+      const start = t0 + sec.bar * song.beatsPerBar * spb - fromSec;
+      const end = start + sec.bars * song.beatsPerBar * spb;
+      if (end < ctx.currentTime) continue;
+      const at = Math.max(start, ctx.currentTime);
+      const cutoff = 900 + sec.intensity * 13000;
+      try {
+        t.tone.frequency.setValueAtTime(Math.max(200, cutoff * 0.8), at);
+        t.tone.frequency.linearRampToValueAtTime(Math.min(18000, cutoff), Math.max(at + 0.05, end));
+      } catch { /* noop */ }
+    }
+  }
+}
+
 export function makeScheduler(graph, song) {
   const spb = 60 / (song.bpm || 100);
   const intensityAt = sectionIntensity(song);
   const tech = graph.tech;
   const offline = isOffline(graph.ctx);
 
+  const variant = song.variant ?? 0;
+
+  // microtuning: a cents offset per pitch class, if the song carries one
+  const tuneFreq = (p) => {
+    const cents = song.tuning?.cents?.[pc(p)] ?? 0;
+    return freqOf(p) * Math.pow(2, cents / 1200);
+  };
+
   return function scheduleEvent(ev, when) {
     const { track, n } = ev;
     const brightness = 0.55 + intensityAt(n.t) * 0.7;
 
+    // worklet voices take whole notes as messages
+    const wnode = graph.tracks[track]?.worklet;
+    if (wnode) {
+      const spec = track === 'bed' ? BED_SPEC : (tech.instruments[track] || tech.instruments.chords);
+      try {
+        wnode.node.port.postMessage({
+          type: 'note', when, dur: Math.max(0.05, n.d * spb),
+          freq: tuneFreq(n.p), vel: n.v,
+          damping: spec.damping ?? 0.6, brightness,
+        });
+        graph.cap.active.push({ end: when + Math.max(0.05, n.d * spb) + 0.6, out: null, vel: n.v });
+        return;
+      } catch { /* fall through to native synthesis */ }
+    }
+
     if (track === 'drums') {
       drumVoice(graph.ctx, graph.tracks.drums.input, {
         when, kind: n.drum, vel: n.v, engine: tech.drums?.engine || 'analog',
+        metallic: (song.metallicHats ?? false) || tech.drums?.engine === 'chiptune',
       });
       if (n.drum === 'kick' && song.sidechain) {
         const g = graph.sidechain.gain;
@@ -212,7 +355,8 @@ export function makeScheduler(graph, song) {
       return;
     }
 
-    const spec = tech.instruments[track] || tech.instruments.chords;
+    const base = track === 'bed' ? BED_SPEC : (tech.instruments[track] || tech.instruments.chords);
+    const spec = track === 'bed' ? base : applyVariant(base, variant);
 
     // Voice pool: prune what has finished, then steal the quietest voice
     // rather than silently dropping the new note. Dropping is what made
@@ -228,7 +372,7 @@ export function makeScheduler(graph, song) {
       const prev = graph.lastNote[track];
       const endSec = n.t * spb;
       if (prev && endSec - prev.end < 0.09 && Math.abs(n.p - prev.p) <= 7 && n.p !== prev.p) {
-        glideFrom = freqOf(prev.p);
+        glideFrom = tuneFreq(prev.p);
       }
       graph.lastNote[track] = { p: n.p, end: endSec + Math.max(0.03, n.d * spb) };
     }
@@ -236,7 +380,7 @@ export function makeScheduler(graph, song) {
     const voice = synthVoice(graph.ctx, graph.tracks[track].input, {
       when,
       dur: Math.max(0.03, n.d * spb),
-      freq: freqOf(n.p),
+      freq: tuneFreq(n.p),
       vel: n.v,
       spec,
       brightness,
@@ -270,8 +414,21 @@ export class Player {
     if (this.ctx) return;
     const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
     this.ctx = new AC({ latencyHint: 'interactive' });
+    this.worklets = await prepareWorklets(this.ctx);
     this.graph = buildGraph(this.ctx, this.song);
     this.schedule = makeScheduler(this.graph, this.song);
+    // Prefer the audio-thread clock: setInterval jitters when the main thread
+    // is busy, and a jittery scheduler is an audible scheduler.
+    if (this.worklets?.clock) {
+      try {
+        this.clockNode = new AudioWorkletNode(this.ctx, 'clock-tick', {
+          numberOfInputs: 0,
+          numberOfOutputs: 0,
+          processorOptions: { frames: 1024 },
+        });
+        this.clockNode.port.onmessage = () => { if (this.playing) this.tick(); };
+      } catch { this.clockNode = null; }
+    }
   }
 
   get duration() { return this.song.durationSec; }
@@ -292,7 +449,12 @@ export class Player {
     this.idx = this.events.findIndex((e) => e.sec >= this.startPos);
     if (this.idx < 0) this.idx = this.events.length;
     this.playing = true;
-    this.timer = setInterval(() => this.tick(), this.intervalMs);
+    applyAutomation(this.graph, this.song, this.startCtxTime, this.startPos);
+    if (this.clockNode) {
+      try { this.clockNode.port.postMessage({ type: 'start' }); } catch { /* noop */ }
+    } else {
+      this.timer = setInterval(() => this.tick(), this.intervalMs);
+    }
     this.tick();
   }
 
@@ -339,6 +501,9 @@ export class Player {
 
   stopTimerOnly() {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    if (this.clockNode) {
+      try { this.clockNode.port.postMessage({ type: 'stop' }); } catch { /* noop */ }
+    }
   }
 
   pause() {
@@ -362,7 +527,7 @@ export class Player {
     if (!this.graph || !this.ctx) return;
     const g = this.graph.master.gain;
     const now = this.ctx.currentTime;
-    const target = silent ? 0.0001 : this.userVolume * 0.55;
+    const target = silent ? 0.0001 : this.userVolume * 0.32;
     try {
       g.cancelScheduledValues(now);
       g.setTargetAtTime(target, now, 0.015);
@@ -373,7 +538,7 @@ export class Player {
     this.userVolume = Math.max(0, Math.min(1.5, v));
     if (this.graph && this.playing) {
       const g = this.graph.master.gain;
-      try { g.setTargetAtTime(this.userVolume * 0.55, this.ctx.currentTime, 0.02); } catch { g.value = this.userVolume * 0.55; }
+      try { g.setTargetAtTime(this.userVolume * 0.32, this.ctx.currentTime, 0.02); } catch { g.value = this.userVolume * 0.32; }
     }
   }
 
@@ -392,7 +557,9 @@ export async function renderSong(song, { sampleRate = 44100, tailSec = 2, onProg
   const OfflineCtor = globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext;
   if (!OfflineCtor) throw new Error('OfflineAudioContext unavailable');
   const ctx = new OfflineCtor(2, frames, sampleRate);
+  await prepareWorklets(ctx);
   const graph = buildGraph(ctx, song);
+  applyAutomation(graph, song, 0, 0);
   const schedule = makeScheduler(graph, song);
   for (const ev of buildEvents(song, only)) {
     try { schedule(ev, Math.max(0, ev.sec)); } catch { graph.cap.dropped++; }

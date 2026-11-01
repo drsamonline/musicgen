@@ -128,6 +128,21 @@
         <output id="volumeout">90</output>
       </div>
       <div class="row">
+        <label for="microtuning">Microtuning</label>
+        <input id="microtuning" type="checkbox" />
+      </div>
+      <div class="row">
+        <label for="settings">Settings</label>
+        <button id="settings" class="ghost">Open settings</button>
+      </div>
+      <div class="groove">
+        <div class="groove-head">
+          <span>Groove</span>
+          <button id="groovereset" class="ghost small">style default</button>
+        </div>
+        <div id="groovegrid" class="groove-grid" role="group" aria-label="Drum pattern editor"></div>
+      </div>
+      <div class="row">
         <label for="reset">Defaults</label>
         <button id="reset" class="ghost">Reset presets</button>
       </div>
@@ -160,6 +175,7 @@
     <button data-act="json">Song JSON — full note data</button>
     <button data-act="import">Import song JSON…</button>
     <button data-act="art">Cover art — 1024 px PNG</button>
+    <button data-act="record">Record live output (WebM)</button>
     <div class="row sheet-row">
       <label for="exporttarget">Loudness</label>
       <select id="exporttarget">
@@ -201,6 +217,36 @@
       <dt>Esc</dt><dd>Stop</dd>
       <dt>?</dt><dd>This dialog</dd>
     </dl>
+    <form method="dialog"><button>Close</button></form>
+  </dialog>
+
+  <dialog id="settings-dialog">
+    <h2>Settings</h2>
+    <div class="row">
+      <label for="set-theme">Theme</label>
+      <select id="set-theme">
+        <option value="system">System</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+    </div>
+    <div class="row">
+      <label for="set-volume">Volume</label>
+      <input id="set-volume" type="range" min="0" max="100" step="1" value="90" />
+      <output id="set-volumeout">90</output>
+    </div>
+    <div class="row">
+      <label for="set-target">Loudness</label>
+      <select id="set-target">
+        <option value="style">Style target</option>
+        <option value="-14">−14 LUFS</option>
+        <option value="-11">−11 LUFS</option>
+        <option value="-18">−18 LUFS</option>
+        <option value="raw">No normalisation</option>
+      </select>
+    </div>
+    <p class="dialog-note">The app makes no network requests and stores nothing outside this
+      browser. Reduced-motion and high-contrast preferences are taken from your system.</p>
     <form method="dialog"><button>Close</button></form>
   </dialog>
 
