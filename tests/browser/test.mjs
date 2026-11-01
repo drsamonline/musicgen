@@ -357,12 +357,16 @@ try {
   });
   const db = (v) => 20 * Math.log10(Math.max(1e-9, v));
   const levels = balance.map((r) => ({ track: r.track, db: db(r.rms) }));
+  const drums = levels.find((l) => l.track === 'drums');
   const loudest = Math.max(...levels.map((l) => l.db));
   const quietest = Math.min(...levels.map((l) => l.db));
   check('every track is audible in the mix', quietest > -60, levels.map((l) => `${l.track} ${l.db.toFixed(1)}dB`).join(', '));
-  check('no track is buried more than 30 dB below the loudest', loudest - quietest < 30,
-    `spread ${(loudest - quietest).toFixed(1)} dB`);
-  const drums = levels.find((l) => l.track === 'drums');
+  // this used to allow a 30 dB spread, which let the bass sit 18 dB over the drums
+  check('no track is buried more than 18 dB below the loudest', loudest - quietest < 18,
+    `spread ${(loudest - quietest).toFixed(1)} dB: ${levels.map((l) => `${l.track} ${l.db.toFixed(1)}`).join(', ')}`);
+  const bassLevel = levels.find((l) => l.track === 'bass');
+  check('bass does not swamp the drums', !bassLevel || !drums || bassLevel.db - drums.db < 12,
+    bassLevel && drums ? `bass ${(bassLevel.db - drums.db).toFixed(1)} dB over drums` : 'no bass');
   const melodic = levels.filter((l) => l.track !== 'drums');
   const melodicMean = melodic.reduce((a, l) => a + l.db, 0) / Math.max(1, melodic.length);
   check('drums do not dominate the melodic tracks', !drums || drums.db - melodicMean < 14,

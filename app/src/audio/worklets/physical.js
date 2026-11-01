@@ -30,7 +30,8 @@ class PhysicalProcessor extends AudioWorkletProcessor {
       index: 0,
       t0: when,
       dur: Math.max(0.1, dur + 0.25),
-      amp: vel,
+      amp: Math.min(1.6, vel * 1.6),  // the engine applies a level boost on top
+      release: 0.06,
       damp: Math.min(0.995, 0.85 + damping * 0.14),
       lp: 0,
       brightness,
@@ -50,18 +51,23 @@ class PhysicalProcessor extends AudioWorkletProcessor {
       for (let v = this.voices.length - 1; v >= 0; v--) {
         const voice = this.voices[v];
         if (t < voice.t0) continue;
-        if (t - voice.t0 > voice.dur) { this.voices.splice(v, 1); continue; }
+        const age = t - voice.t0;
+        if (age > voice.dur) { this.voices.splice(v, 1); continue; }
+        // fade the last 60 ms so a note never ends on a discontinuity
+        const tail = Math.min(1, (voice.dur - age) / voice.release);
         const buf = voice.buffer;
         const cur = buf[voice.index];
         const next = buf[(voice.index + 1) % buf.length];
-        const filtered = voice.lp + (cur - voice.lp) * (0.25 + voice.brightness * 0.6);
+        // a gentler one-pole: the old coefficient left it sounding like noise
+        const filtered = voice.lp + (cur - voice.lp) * (0.12 + voice.brightness * 0.3);
         voice.lp = filtered;
         buf[voice.index] = filtered * voice.damp;
         voice.index = (voice.index + 1) % buf.length;
         // linear interpolation between the two samples for fractional pitch
-        sum += (cur * 0.5 + next * 0.5) * voice.amp;
+        sum += (cur * 0.5 + next * 0.5) * voice.amp * tail;
       }
-      left[i] = Math.max(-1, Math.min(1, sum * 0.8));
+      // soft clip: a hard clamp here was the click everyone could hear
+      left[i] = Math.tanh(sum * 0.9);
       if (out.length > 1) out[1][i] = left[i];
     }
     return true;

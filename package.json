@@ -1,6 +1,6 @@
 {
   "name": "musicgen",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "private": true,
   "type": "module",
   "description": "A pocket generative composer — offline-first PWA that writes, synthesises, masters and exports music in the browser",
@@ -21,6 +21,7 @@
     "lint": "node scripts/lint-determinism.mjs",
     "budget": "node scripts/budget.mjs",
     "changelog": "node scripts/changelog.mjs",
-    "spectral": "node scripts/spectral.mjs"
+    "spectral": "node scripts/spectral.mjs",
+    "visual": "node scripts/visual.mjs"
   }
 }

@@ -7,7 +7,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-c6f24e.svg)](LICENSE)
 [![dependencies: 0](https://img.shields.io/badge/dependencies-0-9aa8ff.svg)](#)
 [![tempo: 20–500 BPM](https://img.shields.io/badge/tempo-20--500%20BPM-9aa8ff.svg)](#)
-[![size: 61 KB gzipped](https://img.shields.io/badge/size-61%20KB%20gzipped-9aa8ff.svg)](#)
+[![size: 68 KB gzipped](https://img.shields.io/badge/size-68%20KB%20gzipped-9aa8ff.svg)](#)
 [![PWA: offline-first](https://img.shields.io/badge/PWA-offline--first-c6f24e.svg)](#)
 [![web audio api](https://img.shields.io/badge/web%20audio-api-ff9f6b.svg)](#)
 
@@ -50,7 +50,7 @@ Then use your browser's **Install** / **Add to Home Screen** (iOS: Share → Add
 
 **The presets** — 11 styles, 10 moods, 10 themes, 8 song types, 7 synthesis technologies, plus a compatibility table that maps styles to allowed moods and engines. Tempo runs **20–500 BPM**; per-track locks freeze the drums or the melody while you reroll everything else. Every share link carries the composer version, so an old seed can tell you it will sound different instead of silently lying.
 
-**The synthesis** — subtractive, FM, chiptune (real `PeriodicWave` pulses), additive, wavetable, Karplus-Strong and noise instruments, plus two **AudioWorklet** engines (granular and a waveguide) with native fallbacks; a drum kit built from oscillators and filtered noise; generated convolution reverb, tempo-synced delay and chorus; glue compressor and limiter on the master, mono bass below 120 Hz, sidechain ducking for EDM, a filter envelope and velocity-to-timbre on every voice, analogue drift, and a stereo-width tap. A voice pool steals the quietest voice with a fade; the scheduler runs a 200 ms lookahead and skips late notes instead of firing them in a burst.
+**The synthesis** — subtractive, FM, chiptune (real `PeriodicWave` pulses), additive, a six-frame **wavetable with a real morph**, Karplus-Strong, a **formant/vowel** layer and noise instruments, plus two **AudioWorklet** engines (granular and a waveguide) with native fallbacks; a drum kit built from oscillators and filtered noise; generated convolution reverb, tempo-synced delay and chorus; glue compressor and limiter on the master, mono bass below 120 Hz, sidechain ducking for EDM, a filter envelope and velocity-to-timbre on every voice, analogue drift, and a stereo-width tap. A voice pool steals the quietest voice with a fade; the scheduler runs a 200 ms lookahead and skips late notes instead of firing them in a burst.
 
 **The exports** — WAV (16/24/32-bit, normalised to a chosen loudness target under a −1 dBTP ceiling), per-track stems as a zip with per-stem loudness in the readme, Type-1 MIDI, full song JSON (export *and* import), 1024 px cover art, and seed links that reproduce the exact song elsewhere.
 
@@ -73,9 +73,10 @@ npm run audit
 
 ```bash
 npm test              # 32 unit tests, no browser needed
-npm run test:browser  # 84 tests in real Chromium with real Web Audio
+npm run test:browser  # 85 tests in real Chromium with real Web Audio
 npm run lint          # determinism lint: no Math.random / Date.now in pure modules
 npm run budget        # shell size, precache completeness, no external requests
+npm run visual        # pixel-diff the studio against committed baselines
 npm run shots         # regenerate docs/screenshots
 npm run audit         # axe + app checks, light and dark
 ```
@@ -93,6 +94,10 @@ The suite asserts, rather than claims:
 - mix balance — every track rendered solo, checked for being audible, not buried, and not letting the drums dominate
 - the app — theme switching and persistence, service worker caching, visualiser modes painting, stems quieter than the mix, track locks surviving a new seed
 - the landing page — composing, drawing and linking its specimen
+
+## Mix balance (why it sounds like a mix)
+
+Per-track loudness is measured, not eyeballed: the drum bus has its own compressor, every track has a measured trim, and `npm run test:browser` renders each track solo and fails if anything is buried more than 18 dB or if the bass sits more than 12 dB over the drums. That test exists because the bass *did* sit 18 dB over the drums in v2.2.0, and it was the difference between "a song" and "a bass solo".
 
 ## Performance and audio integrity
 
@@ -135,7 +140,7 @@ Three decisions are worth knowing about, because they were made against the obvi
 
 **Loudness targets are per style.** Lo-fi sits at −16 LUFS, EDM at −11, Ambient at −18. Normalising everything to a single streaming number would flatten exactly the character the styles are for.
 
-**No AudioWorklets in v1.** Granular and physical-modelling worklets are where a generative-audio project goes to die. Everything here uses native nodes, which is why it runs on a mid-range phone and why the whole app is 61 KB gzipped.
+**Worklets arrived last, not first.** Granular and waveguide processors exist now, but every one of them is a per-track node with a native fallback, and the app still runs with `addModule` unavailable. Building the whole synth on worklets first would have made the fallback the interesting case instead of the exception.
 
 ## Known gaps
 

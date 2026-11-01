@@ -37,13 +37,27 @@ const TRACK_PAN = { drums: 0, bass: 0, chords: -0.18, lead: 0.22, pad: 0, arp: -
 const TRACK_SEND = { drums: 0.12, bass: 0.04, chords: 0.32, lead: 0.4, pad: 0.6, arp: 0.35, bed: 0.8 };
 // per-track FX: delay division (in beats), drive, and a tone filter range
 const TRACK_FX = {
-  drums: { delay: 0.25, drive: 0.05 },
+  drums: { delay: 0.25, drive: 0.02 },
   bass: { delay: 0.25, drive: 0.2 },
   chords: { delay: 0.5, drive: 0.1 },
   lead: { delay: 0.75, drive: 0.12 },
   pad: { delay: 1, drive: 0.05 },
   arp: { delay: 0.5, drive: 0.08 },
   bed: { delay: 1, drive: 0 },
+};
+
+// Global per-track trim. The style mix table says how the arranger *thinks*
+// about balance; this says what the meters say. Measured with per-track LUFS:
+// the drums were 15-18 dB under the bass, which is why the mix sounded like a
+// bass solo. These numbers are the correction, not a taste knob.
+const TRACK_TRIM = {
+  drums: 3.6,
+  bass: 0.4,
+  chords: 1.5,
+  lead: 1.45,
+  pad: 1.4,
+  arp: 1.35,
+  bed: 0.45,
 };
 
 // Small per-style instrument tweaks so "Analog" is not one sound forever.
@@ -117,7 +131,7 @@ export function buildGraph(ctx, song) {
   for (const name of TRACK_NAMES) {
     const input = ctx.createGain();
     const level = song.mix?.[name] ?? 0.6;
-    input.gain.value = Math.max(0, level) * 0.85;
+    input.gain.value = Math.max(0, level) * 0.85 * (TRACK_TRIM[name] ?? 1);
 
     let node = input;
     let panner = null;
@@ -140,6 +154,17 @@ export function buildGraph(ctx, song) {
     }
 
     const duckable = song.sidechain && (name === 'chords' || name === 'pad' || name === 'arp' || name === 'bed');
+    if (name === 'drums' && typeof ctx.createDynamicsCompressor === 'function') {
+      // a drum bus compressor: keeps the punch, controls the peaks
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -22;
+      comp.knee.value = 8;
+      comp.ratio.value = 4;
+      comp.attack.value = 0.004;
+      comp.release.value = 0.14;
+      node.connect(comp);
+      node = comp;
+    }
     node.connect(duckable ? sidechain : master);
 
     // width: a short, opposite-panned delayed tap — cheap stereo
@@ -331,7 +356,8 @@ export function makeScheduler(graph, song) {
       try {
         wnode.node.port.postMessage({
           type: 'note', when, dur: Math.max(0.05, n.d * spb),
-          freq: tuneFreq(n.p), vel: n.v,
+          freq: tuneFreq(n.p),
+          vel: n.v * (wnode.engine === 'waveguide' ? 2.4 : 1.1),
           damping: spec.damping ?? 0.6, brightness,
         });
         graph.cap.active.push({ end: when + Math.max(0.05, n.d * spb) + 0.6, out: null, vel: n.v });

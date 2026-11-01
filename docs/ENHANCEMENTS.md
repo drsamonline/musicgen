@@ -33,9 +33,9 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 |---|------|--------|--------|-------|
 | 2.1 | `[x]` Filter envelope per instrument (independent of amplitude) | S | H | The single biggest "does this sound like a synth" lever. |
 | 2.2 | `[x]` Per-note drift/analogue instability | S | M | Slow detune LFO per voice. |
-| 2.3 | `[ ]` Real wavetable morph (baked tables + crossfade) | M | M | Current version crossfades two oscillators. |
+| 2.3 | `[x]` Real wavetable morph (baked tables + crossfade) | M | M | Current version crossfades two oscillators. |
 | 2.4 | `[x]` Granular + physical modelling in AudioWorklets | L | M | Deferred deliberately; must feature-detect and fall back. |
-| 2.5 | `[ ]` Formant/vowel layer for pads | M | L | Cinematic/Ambient only. |
+| 2.5 | `[x]` Formant/vowel layer for pads | M | L | Cinematic/Ambient only. |
 | 2.6 | `[x]` Drum kit depth — metallic hats, layered claps, rim variants | S | M | Hats are one noise burst; "chip" mode is a flag, not a recipe. |
 | 2.7 | `[x]` Per-track FX: per-track reverb size, delay division, drive | M | H | Sends are global right now. |
 | 2.8 | `[x]` Instrument-level preset variants (e.g. three bass flavours per tech) | M | M | Multiplies the palette without new engines. |
@@ -68,8 +68,8 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 | 4.5 | `[x]` Fade the master on pause instead of rebuilding the graph | S | H | |
 | 4.6 | `[x]` Voice pool with real priority stealing (quietest-oldest, with fade) | M | H | Current cap drops quiet notes at schedule time. |
 | 4.7 | `[x]` Move the scheduler to an AudioWorklet clock | M | M | setInterval jitters under load. |
-| 4.8 | `[ ]` Offload rendering to a Worker with OfflineAudioContext | L | M | Keeps the UI at 60 fps during a 3-minute export. |
-| 4.9 | `[ ]` Typed-array note storage (SoA) for large songs | M | L | Only matters past ~10k notes. |
+| 4.8 | `[—]` Offload rendering to a Worker | — | — | **Not possible as written:** `OfflineAudioContext` does not exist in a Worker scope. The honest version is to keep the UI responsive by chunking the schedule, which is not worth it yet. |
+| 4.9 | `[—]` Typed-array note storage (SoA) | M | L | Only matters past ~10k notes, which no preset reaches. Not worth the churn. |
 | 4.10 | `[x]` Startup budget check in CI (gzipped size + first-audio latency) | S | M | |
 
 ## 5. UI / UX
@@ -100,7 +100,7 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 | 6.5 | `[x]` Keyboard-only section timeline (arrow keys, Home/End) | S | M | |
 | 6.6 | `[x]` Respect `prefers-contrast: more` | S | L | |
 | 6.7 | `[ ]` Focus-visible audit on the sheet and dialogs | S | L | |
-| 6.8 | `[ ]` Screen-reader pass with NVDA/VoiceOver on a real device | M | H | Automated checks cannot hear it. |
+| 6.8 | `[ ]` Screen-reader pass with NVDA/VoiceOver on a real device | M | H | **Cannot be done from here** — automated checks cannot hear it. Still the most valuable thing on this list. |
 
 ## 7. Platform / PWA
 
@@ -127,7 +127,7 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 | 8.4 | `[ ]` MIDI import (so a human phrase can seed the composer) | L | M | Explicitly out of scope in the spec; still the best input idea. |
 | 8.5 | `[ ]` OP-1 / Polyend Tracker style tracker export | M | L | |
 | 8.6 | `[x]` MP3/OGG via a wasm encoder (or refuse and document why) | M | M | WAV is honest; a 40 MB file is not shareable. |
-| 8.7 | `[ ]` QR code for the seed link | S | L | |
+| 8.7 | `[—]` QR code for the seed link | S | L | Deferred on purpose: a wrong QR is worse than no QR, and a correct encoder is ~200 lines of bit-level code I cannot verify here without a decoder. | |
 | 8.8 | `[x]` `navigator.share` with the cover art attached | S | M | |
 
 ## 9. Library & persistence
@@ -150,7 +150,7 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 | 10.3 | `[x]` Golden-seed snapshot diffs in CI | S | H | Catches "the composer changed" on every PR. |
 | 10.4 | `[x]` Loudness regression on golden seeds (±1 LUFS) | M | H | |
 | 10.5 | `[x]` Voice-cap stress test (7/8 at 180 BPM, full song) | S | M | |
-| 10.6 | `[ ]` Visual regression on the studio in both themes | M | M | |
+| 10.6 | `[x]` Visual regression on the studio in both themes | M | M | |
 | 10.7 | `[x]` Custom lint rule banning `Math.random`/`Date.now` in `core/` | S | M | The determinism guarantee deserves enforcement. |
 | 10.8 | `[x]` Property-based tests for the theory helpers | M | M | |
 
@@ -174,6 +174,15 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 5. **Do we want a composer version pin in the UI?** If the algorithm changes, every existing seed changes with it — that is a user-visible break worth surfacing.
 
 ---
+
+## What v2.3.0 closed
+
+**The mix was wrong, and the metrics found it.** Per-track LUFS measurement showed the bass sitting **18 dB over the drums** — the app was, in effect, playing a bass solo with everything else buried. That is the "not proper, glitches" report. Fixed with a measured per-track trim table, a drum-bus compressor (punch kept, peaks controlled), a softer bass attack, and a master gain that leaves the limiter some room. The mix-balance test that let this through was tightened from "within 30 dB" to "within 18 dB, and the bass may not be more than 12 dB over the drums".
+
+- **Real wavetable morph** — six baked frames (sine → triangle → saw → square → organ → bell) as `PeriodicWave`s, crossfaded over the note.
+- **Formant/vowel layer** — a saw through three band-pass formants with vowel morphing, now the additive pad.
+- **Physical worklet fixed** — it was double-boosted and hard-clipping, which was audible as clicks; it now soft-clips through `tanh` and has a release tail.
+- **Visual regression** — the studio is screenshotted in dark, light and desktop against committed baselines, with a pixel-diff tolerance.
 
 ## What v2.2.0 closed
 

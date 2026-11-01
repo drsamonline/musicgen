@@ -12,7 +12,7 @@ export const TECHS = {
   analog: {
     id: 'analog', name: 'Analog',
     instruments: {
-      bass: { ...base, engine: 'subtractive', wave: 'sawtooth', attack: 0.008, decay: 0.16, sustain: 0.6, release: 0.18, cutoff: 620, q: 5, octave: -12, sat: 0.35, gain: 0.62, filterEnv: 0.55, filterDecay: 0.12, velToCutoff: 0.9, drift: 3 },
+      bass: { ...base, engine: 'subtractive', wave: 'sawtooth', attack: 0.014, decay: 0.16, sustain: 0.6, release: 0.18, cutoff: 620, q: 5, octave: -12, sat: 0.35, gain: 0.62, filterEnv: 0.55, filterDecay: 0.12, velToCutoff: 0.9, drift: 3 },
       lead: { ...base, engine: 'subtractive', wave: 'sawtooth', attack: 0.02, decay: 0.22, sustain: 0.5, release: 0.3, cutoff: 2600, q: 3, detune: 9, gain: 0.34, filterEnv: 0.45, drift: 5 },
       chords: { ...base, engine: 'subtractive', wave: 'sawtooth', attack: 0.03, decay: 0.3, sustain: 0.5, release: 0.45, cutoff: 1800, q: 1.5, detune: 12, gain: 0.22 },
       pad: { ...base, engine: 'subtractive', wave: 'triangle', attack: 0.6, decay: 0.8, sustain: 0.7, release: 1.6, cutoff: 1200, q: 1, detune: 16, gain: 0.2, filterEnv: 0.18, drift: 6 },
@@ -45,7 +45,7 @@ export const TECHS = {
       bass: { ...base, engine: 'additive', harmonics: 8, attack: 0.01, decay: 0.2, sustain: 0.5, release: 0.2, cutoff: 1500, gain: 0.5 },
       lead: { ...base, engine: 'additive', harmonics: 12, attack: 0.015, decay: 0.25, sustain: 0.45, release: 0.35, cutoff: 5000, gain: 0.26 },
       chords: { ...base, engine: 'additive', harmonics: 10, attack: 0.04, decay: 0.3, sustain: 0.45, release: 0.5, cutoff: 3000, gain: 0.2 },
-      pad: { ...base, engine: 'additive', harmonics: 16, attack: 0.5, decay: 0.9, sustain: 0.6, release: 1.5, cutoff: 2000, gain: 0.16 },
+      pad: { ...base, engine: 'formant', vowel: 'o', formantShift: 1, attack: 0.7, decay: 1, sustain: 0.65, release: 1.6, cutoff: 2400, gain: 0.2 },
     },
     drums: { engine: 'analog' },
   },

@@ -26,6 +26,33 @@ export function pulseWave(ctx, duty) {
   return w;
 }
 
+// Wavetable frames: sine → triangle → saw → square → organ → bell. Each frame
+// is a PeriodicWave, and a note morphs from one to the next over its length by
+// crossfading two oscillators. This is the real thing, not two detuned saws.
+const tableCache = new WeakMap();
+
+function frameWave(ctx, frame, harmonics = 24) {
+  let m = tableCache.get(ctx);
+  if (!m) { m = new Map(); tableCache.set(ctx, m); }
+  const key = `f${frame}`;
+  if (m.has(key)) return m.get(key);
+  const real = new Float32Array(harmonics);
+  const imag = new Float32Array(harmonics);
+  for (let n = 1; n < harmonics; n++) {
+    let amp = 0;
+    if (frame === 0) amp = n === 1 ? 1 : 0;                       // sine
+    else if (frame === 1) amp = n % 2 === 1 ? 1 / (n * n) : 0;    // triangle
+    else if (frame === 2) amp = 1 / n;                            // saw
+    else if (frame === 3) amp = n % 2 === 1 ? 1 / n : 0;          // square
+    else if (frame === 4) amp = [1, 0.5, 0.25, 0.15, 0.1][n - 1] || 0; // organ
+    else amp = (n % 3 === 1 ? 1 / (n * 1.4) : 0) + (n === 7 ? 0.3 : 0); // bell
+    imag[n] = amp;
+  }
+  const wave = ctx.createPeriodicWave(real, imag, { disableNormalization: false });
+  m.set(key, wave);
+  return wave;
+}
+
 export function noiseBuffer(ctx, seconds = 1) {
   let m = waveCache.get(ctx);
   if (!m) { m = new Map(); waveCache.set(ctx, m); }
@@ -183,17 +210,26 @@ export function synthVoice(ctx, dest, opts) {
     stopAt = env(out.gain, when, dur, spec, peak);
     for (const o of oscs) { o.start(when); o.stop(stopAt); }
   } else if (engine === 'wavetable') {
-    // two detuned oscillators crossfaded — the table morph, cheaply
+    // two table frames crossfaded over the note: the morph is audible
+    const frames = Math.max(2, Math.min(6, spec.frames ?? 4));
+    const startFrame = Math.floor((spec.tableStart ?? 1) % frames);
+    const endFrame = Math.min(frames - 1, startFrame + 1);
     const a = ctx.createOscillator();
     const b = ctx.createOscillator();
-    a.type = 'sawtooth';
-    b.type = 'square';
-    a.frequency.value = freq;
-    b.frequency.value = freq * 1.003;
+    a.setPeriodicWave(frameWave(ctx, startFrame));
+    b.setPeriodicWave(frameWave(ctx, endFrame));
+    pitchStart(a, freq);
+    pitchStart(b, freq);
     const mix = ctx.createGain();
     mix.gain.value = 0.5;
-    a.connect(mix);
-    b.connect(mix);
+    const morphA = ctx.createGain();
+    const morphB = ctx.createGain();
+    morphA.gain.setValueAtTime(1, when);
+    morphA.gain.linearRampToValueAtTime(0.25, when + Math.max(0.1, dur * 0.8));
+    morphB.gain.setValueAtTime(0, when);
+    morphB.gain.linearRampToValueAtTime(0.75, when + Math.max(0.1, dur * 0.8));
+    a.connect(morphA).connect(mix);
+    b.connect(morphB).connect(mix);
     mix.connect(filter);
     const sweep = ctx.createBiquadFilter();
     sweep.type = 'peaking';
@@ -234,6 +270,38 @@ export function synthVoice(ctx, dest, opts) {
       fb.gain.setValueAtTime(fb.gain.value, closeAt);
       fb.gain.linearRampToValueAtTime(0, stopAt);
     } catch { /* noop */ }
+  } else if (engine === 'formant') {
+    // a saw through three bandpass filters, with vowel formant centres
+    const VOWELS = {
+      a: [800, 1150, 2900], e: [400, 1700, 2600], i: [300, 2200, 3000],
+      o: [450, 800, 2830], u: [325, 700, 2530],
+    };
+    const vowel = VOWELS[spec.vowel || 'a'] || VOWELS.a;
+    const src = ctx.createOscillator();
+    src.type = 'sawtooth';
+    pitchStart(src, freq);
+    const sum = ctx.createGain();
+    sum.gain.value = 0.6;
+    const nodes2 = [];
+    vowel.forEach((centre, i) => {
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(centre * (spec.formantShift ?? 1), when);
+      bp.Q.value = 6 + i * 2;
+      const g = ctx.createGain();
+      g.gain.value = 1 / (i + 1.4);
+      src.connect(bp).connect(g).connect(sum);
+      nodes2.push(bp, g);
+    });
+    // a little of the dry saw keeps it from sounding like a telephone
+    const dry = ctx.createGain();
+    dry.gain.value = 0.18;
+    src.connect(dry).connect(sum);
+    sum.connect(filter);
+    nodes.push(src, sum, dry, filter, out, ...nodes2);
+    stopAt = env(out.gain, when, dur, spec, peak);
+    src.start(when);
+    src.stop(stopAt);
   } else if (engine === 'noise') {
     const src = ctx.createBufferSource();
     src.buffer = noiseBuffer(ctx, 2);
