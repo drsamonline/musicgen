@@ -26,6 +26,7 @@ function launchOptions(extra = []) {
 }
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -187,6 +188,41 @@ try {
   });
   check('service worker registered', sw.registered);
   check('app shell cached', sw.caches.length > 0, sw.caches.join(','));
+
+  console.log('\nThemes');
+  const themeStart = await page.evaluate(() => document.documentElement.dataset.theme);
+  await page.click('#themetoggle');
+  await wait(250);
+  const themeLight = await page.evaluate(() => ({
+    attr: document.documentElement.dataset.theme,
+    bg: getComputedStyle(document.body).backgroundColor,
+    meta: document.querySelector('meta[name="theme-color"]').getAttribute('content'),
+  }));
+  check('theme toggle switches the document', themeLight.attr !== themeStart, `${themeStart} -> ${themeLight.attr}`);
+  const themeTokens = await page.evaluate(() => {
+    const cs = getComputedStyle(document.documentElement);
+    const { themePalette } = window.__musicgen || {};
+    return {
+      isLight: cs.getPropertyValue('--is-light').trim(),
+      bg: cs.getPropertyValue('--bg').trim(),
+      text: cs.getPropertyValue('--text').trim(),
+      paletteLight: themePalette ? themePalette().isLight : null,
+    };
+  });
+  check('light theme declares itself light', themeTokens.isLight === '1', JSON.stringify(themeTokens));
+  check('light theme background is pale', /#f/i.test(themeTokens.bg), themeTokens.bg);
+  check('theme-color meta follows the theme', themeLight.meta.toLowerCase() === '#f2f4fa', themeLight.meta);
+  const persisted = await page.evaluate(() => {
+    const raw = localStorage.getItem('musicgen.v1');
+    return raw ? JSON.parse(raw).ui?.theme : null;
+  });
+  check('theme choice is persisted', persisted === 'light', String(persisted));
+  await page.reload({ waitUntil: 'networkidle0' });
+  await page.waitForFunction(() => document.getElementById('title').textContent !== '—', { timeout: 15000 });
+  const afterReload = await page.evaluate(() => document.documentElement.dataset.theme);
+  check('theme survives a reload', afterReload === 'light', afterReload);
+  await page.click('#themetoggle');
+  await wait(200);
 
   console.log('\nVisualiser modes');
   for (const mode of ['bars', 'wave', 'art', 'roll']) {

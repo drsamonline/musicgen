@@ -28,3 +28,5 @@ jobs:
         run: npm install --no-save puppeteer@23
       - name: Browser tests (real Web Audio, offline render, PWA)
         run: node tests/browser/test.mjs
+      - name: Accessibility audit (axe, both themes)
+        run: npm install --no-save axe-core && node scripts/audit.mjs

@@ -13,16 +13,16 @@ import { encodeWav, analyseBuffer, normalisationGain, download } from './export/
 import { songToMidi } from './export/midi.js';
 import { zipStore } from './export/zip.js';
 import { drawArtwork, encodeState, decodeState, shareUrl } from './export/artwork.js';
-import { drawPianoRoll, drawBars, drawWaveform, drawArt } from './visual/pianoRoll.js';
+import { drawPianoRoll, drawBars, drawWaveform, drawArt, invalidatePalette } from './visual/pianoRoll.js';
 import {
-  state, loadState, subscribe, emit, setPresets, toggleLock,
+  state, loadState, subscribe, emit, setPresets, toggleLock, persist,
   librarySave, libraryList, libraryDelete,
 } from './state.js';
 
 const $ = (id) => document.getElementById(id);
 
 const els = {
-  play: $('play'), mute: $('mute'), generate: $('generate'), random: $('random'),
+  play: $('play'), mute: $('mute'), themeToggle: $('themetoggle'), generate: $('generate'), random: $('random'),
   evolve: $('evolve'), mutate: $('mutate'), menu: $('menu'),
   title: $('title'), meta: $('meta'), seed: $('seed'),
   viz: $('viz'), progressbar: $('progressbar'),
@@ -103,6 +103,36 @@ function toast(msg) {
   els.toast.classList.add('show');
   clearTimeout(toast.t);
   toast.t = setTimeout(() => els.toast.classList.remove('show'), 2400);
+}
+
+// ------------------------------------------------------------- theme
+const THEME_MODES = ['system', 'light', 'dark'];
+const THEME_GLYPH = { system: '◐', light: '☀', dark: '☾' };
+
+function resolveTheme(pref) {
+  if (pref === 'light' || pref === 'dark') return pref;
+  return matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+
+function applyTheme(pref, { redraw = true } = {}) {
+  const next = THEME_MODES.includes(pref) ? pref : 'system';
+  state.ui.theme = next;
+  document.documentElement.dataset.theme = next;
+  els.themeToggle.textContent = THEME_GLYPH[next];
+  els.themeToggle.setAttribute('aria-label', `Colour theme: ${next}`);
+  els.themeToggle.title = `Colour theme: ${next} (T)`;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', resolveTheme(next) === 'light' ? '#f2f4fa' : '#07080f');
+  invalidatePalette();
+  if (redraw) drawViz(player?.position ?? 0);
+  persist();
+}
+
+function cycleTheme() {
+  const i = THEME_MODES.indexOf(state.ui.theme || 'system');
+  const next = THEME_MODES[(i + 1) % THEME_MODES.length];
+  applyTheme(next);
+  toast(`Theme: ${next}`);
 }
 
 // ------------------------------------------------------------- history
@@ -594,6 +624,7 @@ function escapeHtml(s) {
 function wireActions() {
   els.play.addEventListener('click', () => { if (player?.playing) pause(); else play(); });
   els.mute.addEventListener('click', toggleMute);
+  els.themeToggle.addEventListener('click', cycleTheme);
   els.generate.addEventListener('click', () => generate());
   els.random.addEventListener('click', doRandom);
   els.evolve.addEventListener('click', doEvolve);
@@ -643,6 +674,7 @@ function wireActions() {
     else if (k === 'e') doEvolve();
     else if (k === 'm') doMutate();
     else if (k === 'u') toggleMute();
+    else if (k === 't') cycleTheme();
     else if (k === 'v') setVizMode(VIZ_MODES[(VIZ_MODES.indexOf(vizMode) + 1) % VIZ_MODES.length]);
     else if (k === 'escape') { stop(); els.sheet.hidden = true; }
     else if (k === '?') els.help.showModal();
@@ -656,6 +688,9 @@ function wireActions() {
   });
 
   window.addEventListener('resize', () => drawViz(player?.position ?? 0));
+  matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+    if ((state.ui.theme || 'system') === 'system') applyTheme('system');
+  });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) stopRaf();
     else if (player?.playing) startRaf();
@@ -683,6 +718,7 @@ async function boot() {
     }
   }
 
+  applyTheme(state.ui.theme || 'system', { redraw: false });
   generate();
   if (vizMode === 'art') setIdleAnimation();
 

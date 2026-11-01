@@ -19,11 +19,25 @@ export function makeReverbIR(ctx, seconds = 2.2, decay = 2.4, seed = 1) {
   return buf;
 }
 
+// IRs are expensive to synthesise (a second or more of seeded noise), so build
+// one per (context, length) and reuse it — including across graph rebuilds.
+const irCache = new WeakMap();
+
+function cachedIR(ctx, seconds, decay, seed) {
+  let m = irCache.get(ctx);
+  if (!m) { m = new Map(); irCache.set(ctx, m); }
+  const key = seconds.toFixed(2);
+  if (m.has(key)) return m.get(key);
+  const buf = makeReverbIR(ctx, seconds, decay, seed);
+  m.set(key, buf);
+  return buf;
+}
+
 export function createFxBuses(ctx, song, destination) {
   const fx = song.fx || {};
   const irSeconds = 1.2 + (fx.reverb ?? 0.4) * 3.4;
   const convolver = ctx.createConvolver();
-  convolver.buffer = makeReverbIR(ctx, irSeconds, 2.2, 7);
+  convolver.buffer = cachedIR(ctx, irSeconds, 2.2, 7);
   const revIn = ctx.createGain();
   const revOut = ctx.createGain();
   revOut.gain.value = 0.9;

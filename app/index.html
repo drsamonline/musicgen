@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="system">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -16,6 +16,7 @@
 <a class="skip" href="#controls">Skip to controls</a>
 
 <main id="app">
+  <h1 class="sr-only">MusicGen — generative composer studio</h1>
   <header class="topbar">
     <div class="transport">
       <button id="play" aria-label="Play or pause">▶</button>
@@ -24,6 +25,7 @@
       <button id="evolve" aria-label="Evolve: same presets, new seed">Evolve</button>
       <button id="mutate" aria-label="Mutate one axis">Mutate</button>
       <button id="mute" aria-pressed="false" aria-label="Mute">Mute</button>
+      <button id="themetoggle" aria-label="Colour theme: system" title="Colour theme">◐</button>
       <button id="menu" aria-label="More actions" aria-expanded="false">⋯</button>
     </div>
     <div class="songline">
@@ -154,6 +156,7 @@
       <dt>M</dt><dd>Mutate</dd>
       <dt>U</dt><dd>Mute</dd>
       <dt>V</dt><dd>Cycle visualiser</dd>
+      <dt>T</dt><dd>Cycle theme: system → light → dark</dd>
       <dt>L</dt><dd>Lock / unlock focused control</dd>
       <dt>1–6</dt><dd>Focus a preset axis</dd>
       <dt>⌘/Ctrl Z</dt><dd>Undo preset change</dd>

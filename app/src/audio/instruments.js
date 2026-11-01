@@ -51,16 +51,29 @@ function env(param, when, dur, spec, peak) {
   return off + r + 0.02;
 }
 
-function saturator(ctx, amount) {
-  const ws = ctx.createWaveShaper();
+// The saturation curve is identical for a given amount, so build it once and
+// share the Float32Array between every voice. (This used to allocate 1024
+// floats per note, which dominated the cost of dense sections.)
+const curveCache = new Map();
+
+function saturationCurve(amount) {
+  const bucket = Math.round(Math.max(0, Math.min(1, amount)) * 20) / 20;
+  const hit = curveCache.get(bucket);
+  if (hit) return hit;
   const n = 1024;
   const curve = new Float32Array(n);
-  const k = Math.max(0.0001, amount) * 20;
+  const k = Math.max(0.0001, bucket) * 20;
   for (let i = 0; i < n; i++) {
     const x = (i / (n - 1)) * 2 - 1;
     curve[i] = Math.tanh(x * (1 + k)) / Math.tanh(1 + k);
   }
-  ws.curve = curve;
+  curveCache.set(bucket, curve);
+  return curve;
+}
+
+function saturator(ctx, amount) {
+  const ws = ctx.createWaveShaper();
+  ws.curve = saturationCurve(amount);
   ws.oversample = '2x';
   return ws;
 }

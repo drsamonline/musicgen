@@ -1,6 +1,6 @@
 {
   "name": "musicgen",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "A pocket generative composer — offline-first PWA that writes, synthesises, masters and exports music in the browser",
@@ -16,6 +16,7 @@
     "test": "node tests/unit/run.js",
     "test:unit": "node tests/unit/run.js",
     "test:browser": "node tests/browser/test.mjs",
-    "shots": "node scripts/screenshots.mjs"
+    "shots": "node scripts/screenshots.mjs",
+    "audit": "node scripts/audit.mjs"
   }
 }

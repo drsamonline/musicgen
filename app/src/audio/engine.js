@@ -92,13 +92,23 @@ export function buildEvents(song, only = null) {
   return events;
 }
 
+// Sections are contiguous, so a binary search over precomputed start beats
+// beats scanning the list for every note (there are thousands of notes).
 function sectionIntensity(song) {
+  const spans = song.sections.map((s) => ({
+    start: s.bar * song.beatsPerBar,
+    end: (s.bar + s.bars) * song.beatsPerBar,
+    intensity: s.intensity ?? 0.6,
+  }));
   return (beat) => {
-    for (const s of song.sections) {
-      const start = s.bar * song.beatsPerBar;
-      if (beat >= start - 0.01 && beat < start + s.bars * song.beatsPerBar) return s.intensity ?? 0.6;
+    let lo = 0, hi = spans.length - 1, found = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (beat < spans[mid].start) hi = mid - 1;
+      else if (beat >= spans[mid].end) lo = mid + 1;
+      else { found = mid; break; }
     }
-    return 0.6;
+    return found >= 0 ? spans[found].intensity : 0.6;
   };
 }
 
@@ -170,6 +180,7 @@ export class Player {
   async play(fromSec = null) {
     await this.init();
     if (this.ctx.state === 'suspended') await this.ctx.resume();
+    this.duck(false);
     const from = fromSec == null ? this.position : fromSec;
     this.stopTimerOnly();
     this.startPos = from >= this.duration - 0.05 ? 0 : from;
@@ -214,27 +225,35 @@ export class Player {
     this.playing = false;
     this.stopTimerOnly();
     this.startPos = p;
-    this.teardownGraph();
+    this.duck(true);
   }
 
   stop() {
     this.playing = false;
     this.stopTimerOnly();
     this.startPos = 0;
-    this.teardownGraph();
+    this.duck(true);
   }
 
-  teardownGraph() {
-    if (this.graph && this.ctx) {
-      // rebuild the graph so no stale voices keep ringing
-      try { this.graph.master.disconnect(); } catch { /* noop */ }
-      this.graph = buildGraph(this.ctx, this.song);
-      this.schedule = makeScheduler(this.graph, this.song);
-    }
+  // Fade the master out (and back in) instead of tearing the graph down.
+  // Rebuilding it used to regenerate the reverb IR on every pause.
+  duck(silent) {
+    if (!this.graph || !this.ctx) return;
+    const g = this.graph.master.gain;
+    const now = this.ctx.currentTime;
+    const target = silent ? 0 : (this.userVolume ?? 0.9) * 0.55;
+    try {
+      g.cancelScheduledValues(now);
+      g.setTargetAtTime(target, now, 0.015);
+    } catch { /* noop */ }
   }
 
   setVolume(v) {
-    if (this.graph) this.graph.master.gain.value = Math.max(0, Math.min(1.5, v));
+    this.userVolume = Math.max(0, Math.min(1.5, v));
+    if (this.graph && this.playing) {
+      const g = this.graph.master.gain;
+      try { g.setTargetAtTime(this.userVolume * 0.55, this.ctx.currentTime, 0.02); } catch { g.value = this.userVolume * 0.55; }
+    }
   }
 
   async close() {
