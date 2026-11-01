@@ -5,7 +5,7 @@ const base = {
   attack: 0.01, decay: 0.18, sustain: 0.55, release: 0.35,
   cutoff: 3000, q: 1, wave: 'sawtooth', detune: 6, gain: 0.5, sat: 0.15,
   // filter envelope + velocity-to-timbre + analogue drift
-  filterEnv: 0.35, filterAttack: 0.004, filterDecay: 0.16, velToCutoff: 0.5, drift: 2,
+  filterEnv: 0.35, filterAttack: 0.004, filterDecay: 0.16, velToCutoff: 0.5, drift: 2, glide: 0.045,
 };
 
 export const TECHS = {
@@ -32,8 +32,8 @@ export const TECHS = {
   chiptune: {
     id: 'chiptune', name: 'Chiptune',
     instruments: {
-      bass: { ...base, engine: 'chiptune', duty: 0.5, attack: 0.001, decay: 0.09, sustain: 0.7, release: 0.06, cutoff: 2000, gain: 0.5, filterEnv: 0, drift: 0 },
-      lead: { ...base, engine: 'chiptune', duty: 0.25, attack: 0.001, decay: 0.08, sustain: 0.6, release: 0.05, cutoff: 6000, gain: 0.28, filterEnv: 0, drift: 0 },
+      bass: { ...base, engine: 'chiptune', duty: 0.5, attack: 0.001, decay: 0.09, sustain: 0.7, release: 0.06, cutoff: 2000, gain: 0.5, filterEnv: 0, drift: 0, glide: 0 },
+      lead: { ...base, engine: 'chiptune', duty: 0.25, attack: 0.001, decay: 0.08, sustain: 0.6, release: 0.05, cutoff: 6000, gain: 0.28, filterEnv: 0, drift: 0, glide: 0 },
       chords: { ...base, engine: 'chiptune', duty: 0.125, attack: 0.001, decay: 0.1, sustain: 0.5, release: 0.08, cutoff: 4000, gain: 0.16, filterEnv: 0, drift: 0 },
       pad: { ...base, engine: 'chiptune', duty: 0.5, attack: 0.05, decay: 0.2, sustain: 0.7, release: 0.3, cutoff: 2500, gain: 0.14, filterEnv: 0, drift: 0 },
     },

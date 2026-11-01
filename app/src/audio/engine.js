@@ -124,6 +124,7 @@ export function buildGraph(ctx, song) {
   return {
     ctx, master, chain, fx, tracks, tech, analyser, sidechain,
     cap: { max: isOffline(ctx) ? 64 : voiceCap(), active: [], stolen: 0, dropped: 0 },
+    lastNote: { bass: null, lead: null },
     song,
   };
 }
@@ -221,6 +222,17 @@ export function makeScheduler(graph, song) {
     pruneVoices(graph.cap, now);
     if (graph.cap.active.length >= graph.cap.max) stealQuietest(graph.cap, now, when);
 
+    // legato: a note that follows closely on a mono-ish track slides into it
+    let glideFrom = null;
+    if (track === 'bass' || track === 'lead') {
+      const prev = graph.lastNote[track];
+      const endSec = n.t * spb;
+      if (prev && endSec - prev.end < 0.09 && Math.abs(n.p - prev.p) <= 7 && n.p !== prev.p) {
+        glideFrom = freqOf(prev.p);
+      }
+      graph.lastNote[track] = { p: n.p, end: endSec + Math.max(0.03, n.d * spb) };
+    }
+
     const voice = synthVoice(graph.ctx, graph.tracks[track].input, {
       when,
       dur: Math.max(0.03, n.d * spb),
@@ -228,6 +240,7 @@ export function makeScheduler(graph, song) {
       vel: n.v,
       spec,
       brightness,
+      glideFrom,
     });
     if (voice) graph.cap.active.push({ end: voice.end, out: voice.out, vel: n.v });
   };

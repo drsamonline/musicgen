@@ -1,5 +1,5 @@
 // WAV export: OfflineAudioContext render -> PCM encoder.
-import { integratedLufs, truePeak, dbToGain } from '../audio/lufs.js';
+import { integratedLufs, truePeak, truePeakOversampled, dbToGain } from '../audio/lufs.js';
 
 export function encodeWav(audioBuffer, { bitDepth = 16, gain = 1 } = {}) {
   const channels = audioBuffer.numberOfChannels;
@@ -57,7 +57,7 @@ export function analyseBuffer(audioBuffer) {
   for (let c = 0; c < audioBuffer.numberOfChannels; c++) data.push(audioBuffer.getChannelData(c));
   return {
     lufs: integratedLufs(data, audioBuffer.sampleRate),
-    peakDb: truePeak(data),
+    peakDb: truePeakOversampled(data),
     channels: audioBuffer.numberOfChannels,
     sampleRate: audioBuffer.sampleRate,
     durationSec: audioBuffer.length / audioBuffer.sampleRate,

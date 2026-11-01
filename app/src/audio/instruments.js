@@ -111,8 +111,16 @@ function saturator(ctx, amount) {
 // ---------------------------------------------------------------- voices
 export function synthVoice(ctx, dest, opts) {
   const {
-    when, dur, freq, vel = 0.7, spec = {}, brightness = 1,
+    when, dur, freq, vel = 0.7, spec = {}, brightness = 1, glideFrom = null,
   } = opts;
+
+  // portamento: start at the previous pitch and slide, for adjacent notes
+  const glide = glideFrom && spec.glide ? Math.max(0.01, spec.glide) : 0;
+  const pitchStart = (osc, startFreq) => {
+    if (!glide) { osc.frequency.value = startFreq; return; }
+    osc.frequency.setValueAtTime(glideFrom, when);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(20, startFreq), when + glide);
+  };
 
   const engine = spec.engine || 'subtractive';
   const peak = Math.max(0.0005, (spec.gain ?? 0.4) * vel * brightness);
@@ -137,7 +145,7 @@ export function synthVoice(ctx, dest, opts) {
     const mod = ctx.createOscillator();
     const modGain = ctx.createGain();
     const idx = (spec.fmIndex ?? 1.5) * freq;
-    car.frequency.value = freq;
+    pitchStart(car, freq);
     mod.frequency.value = freq * (spec.fmRatio ?? 2);
     modGain.gain.setValueAtTime(idx, when);
     modGain.gain.exponentialRampToValueAtTime(Math.max(1, idx * 0.15), when + Math.max(0.05, dur * 0.8));
@@ -150,7 +158,7 @@ export function synthVoice(ctx, dest, opts) {
   } else if (engine === 'chiptune') {
     const osc = ctx.createOscillator();
     osc.setPeriodicWave(pulseWave(ctx, spec.duty ?? 0.5));
-    osc.frequency.value = freq;
+    pitchStart(osc, freq);
     osc.connect(filter);
     nodes.push(osc, filter, out);
     stopAt = env(out.gain, when, dur, spec, peak);
@@ -252,8 +260,8 @@ export function synthVoice(ctx, dest, opts) {
     const o2 = ctx.createOscillator();
     o1.type = spec.wave || 'sawtooth';
     o2.type = spec.wave || 'sawtooth';
-    o1.frequency.value = freq;
-    o2.frequency.value = freq;
+    pitchStart(o1, freq);
+    pitchStart(o2, freq);
     o1.detune.value = -detune;
     o2.detune.value = detune;
     const mix = ctx.createGain();

@@ -266,6 +266,35 @@ try {
     check(`${row.style} does not clip`, row.peak < 0, `${row.peak} dBTP`);
   }
 
+  console.log('\nMix balance');
+  const balance = await page.evaluate(async () => {
+    const { compose } = await import('./src/core/composer.js');
+    const { renderSong } = await import('./src/audio/engine.js');
+    const song = compose({ style: 'lofi', mood: 'dreamy', theme: 'rain', tech: 'analog', bpm: 84, type: 'loop' }, 'balance');
+    const tracks = ['drums', 'bass', 'chords', 'lead', 'pad'].filter((t) => (song.tracks[t] || []).length);
+    const rows = [];
+    for (const track of tracks) {
+      const buf = await renderSong(song, { sampleRate: 22050, tailSec: 0.2, only: [track] });
+      const d = buf.getChannelData(0);
+      let s = 0;
+      for (let i = 0; i < d.length; i++) s += d[i] * d[i];
+      rows.push({ track, rms: Math.sqrt(s / d.length) });
+    }
+    return rows;
+  });
+  const db = (v) => 20 * Math.log10(Math.max(1e-9, v));
+  const levels = balance.map((r) => ({ track: r.track, db: db(r.rms) }));
+  const loudest = Math.max(...levels.map((l) => l.db));
+  const quietest = Math.min(...levels.map((l) => l.db));
+  check('every track is audible in the mix', quietest > -60, levels.map((l) => `${l.track} ${l.db.toFixed(1)}dB`).join(', '));
+  check('no track is buried more than 30 dB below the loudest', loudest - quietest < 30,
+    `spread ${(loudest - quietest).toFixed(1)} dB`);
+  const drums = levels.find((l) => l.track === 'drums');
+  const melodic = levels.filter((l) => l.track !== 'drums');
+  const melodicMean = melodic.reduce((a, l) => a + l.db, 0) / Math.max(1, melodic.length);
+  check('drums do not dominate the melodic tracks', !drums || drums.db - melodicMean < 14,
+    drums ? `drums ${(drums.db - melodicMean).toFixed(1)} dB over melodic mean` : 'no drums');
+
   console.log('\nStress: 7/8 at 500 BPM');
   const stress = await page.evaluate(async () => {
     const { compose } = await import('./src/core/composer.js');

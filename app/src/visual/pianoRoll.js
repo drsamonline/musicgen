@@ -301,3 +301,47 @@ export function beatAtX(canvas, song, x, view = null) {
   const rel = Math.max(0, Math.min(1, (x - rect.left) / Math.max(1, rect.width)));
   return start + rel * span;
 }
+
+
+// Which note is under a pointer, using the same layout as drawPianoRoll.
+export function noteAt(canvas, song, clientX, clientY, view = null) {
+  if (!song) return null;
+  const rect = canvas.getBoundingClientRect();
+  const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
+  const w = rect.width * dpr;
+  const h = rect.height * dpr;
+  const x = (clientX - rect.left) * dpr;
+  const y = (clientY - rect.top) * dpr;
+
+  const totalBeats = song.bars * song.beatsPerBar;
+  const span = Math.max(4, Math.min(totalBeats, view?.span ?? 32));
+  const start = view ? Math.max(0, Math.min(Math.max(0, totalBeats - span), view.start)) : 0;
+  const beat = start + (x / Math.max(1, w)) * span;
+
+  const mel = ['lead', 'chords', 'bass', 'pad', 'arp'];
+  const pitches = [];
+  for (const t of mel) for (const n of song.tracks[t] || []) pitches.push(n.p);
+  let lo = 36, hi = 88;
+  if (pitches.length) {
+    pitches.sort((a, b) => a - b);
+    lo = Math.max(21, pitches[Math.floor(pitches.length * 0.02)] - 2);
+    hi = Math.min(108, pitches[Math.floor(pitches.length * 0.98)] + 2);
+  }
+  const laneTop = 8 * dpr;
+  const laneH = h - 26 * dpr;
+  const pitch = lo + ((laneTop + laneH - y) / Math.max(1, laneH)) * (hi - lo);
+  const tolBeats = (6 / Math.max(1, w)) * span;
+  const tolPitch = ((hi - lo) / Math.max(1, laneH)) * 8 * dpr;
+
+  let best = null;
+  let bestScore = Infinity;
+  for (const track of mel) {
+    for (const n of song.tracks[track] || []) {
+      if (beat < n.t - tolBeats || beat > n.t + n.d + tolBeats) continue;
+      if (Math.abs(n.p - pitch) > tolPitch) continue;
+      const score = Math.abs(n.p - pitch) + Math.abs(beat - (n.t + n.d / 2));
+      if (score < bestScore) { bestScore = score; best = { ...n, track }; }
+    }
+  }
+  return best;
+}

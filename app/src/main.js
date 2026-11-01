@@ -1,5 +1,5 @@
 // App wiring: presets, playback, visualisers, export, keyboard, persistence.
-import { compose, normalisePresets, DEFAULT_PRESETS, BPM_MIN, BPM_MAX } from './core/composer.js';
+import { compose, normalisePresets, DEFAULT_PRESETS, BPM_MIN, BPM_MAX, COMPOSER_VERSION } from './core/composer.js';
 import { validateSong } from './core/validate.js';
 import { Rng, randomSeed } from './core/rng.js';
 import { STYLES } from './presets/styles.js';
@@ -14,8 +14,10 @@ import { songToMidi } from './export/midi.js';
 import { zipStore } from './export/zip.js';
 import { drawArtwork, encodeState, decodeState, shareUrl } from './export/artwork.js';
 import {
-  drawPianoRoll, drawBars, drawWaveform, drawArt, invalidatePalette, beatAtX,
+  drawPianoRoll, drawBars, drawWaveform, drawArt, invalidatePalette, beatAtX, noteAt,
 } from './visual/pianoRoll.js';
+import { synthVoice } from './audio/instruments.js';
+import { freqOf } from './core/theory.js';
 import {
   state, loadState, subscribe, emit, setPresets, toggleLock, persist,
   librarySave, libraryList, libraryDelete, libraryRename, libraryDuplicate,
@@ -35,7 +37,7 @@ const els = {
   swing: $('swing'), swingout: $('swingout'), chaos: $('chaos'), chaosout: $('chaosout'),
   arp: $('arp'), lockdrums: $('lockdrums'), locklead: $('locklead'),
   volume: $('volume'), volumeout: $('volumeout'), reset: $('reset'),
-  sections: $('sections'), summary: $('summary'), toast: $('toast'), live: $('live'),
+  sections: $('sections'), summary: $('summary'), toast: $('toast'), live: $('live'), notice: $('notice'),
   sheet: $('menu-sheet'), help: $('help'), library: $('library'),
   libraryList: $('library-list'), searchlib: $('searchlib'), fileinput: $('fileinput'),
   exporttarget: $('exporttarget'),
@@ -118,6 +120,20 @@ function toast(msg) {
   els.toast.classList.add('show');
   clearTimeout(toast.t);
   toast.t = setTimeout(() => els.toast.classList.remove('show'), 2600);
+}
+
+function notice(msg) {
+  if (!els.notice) return;
+  els.notice.textContent = msg;
+  els.notice.hidden = !msg;
+}
+
+function checkVersion(version, source) {
+  if (version == null) return true;
+  if (Number(version) === COMPOSER_VERSION) return true;
+  notice(`This ${source} was made with composer v${version}; you are on v${COMPOSER_VERSION}, `
+    + 'so the same seed now produces different notes. Re-save it if you like what you hear.');
+  return false;
 }
 
 function fail(what, err) {
@@ -550,7 +566,11 @@ function wireRoll() {
     dragging = false;
     const moved = Math.abs(e.clientX - dragStartX);
     if (moved > 6 || !state.song) return;
-    // a tap scrubs the playhead to that beat
+
+    // tapping a note auditions it; tapping empty space scrubs
+    const hit = noteAt(els.viz, state.song, e.clientX, e.clientY, view);
+    if (hit) { auditionNote(hit); return; }
+
     const beat = beatAtX(els.viz, state.song, e.clientX, view);
     const at = (beat * 60) / state.song.bpm;
     ensurePlayer();
@@ -668,7 +688,21 @@ function doRandom() {
   state.seed = randomSeed(12);
   state.presets = normalisePresets({ ...state.presets, ...patch });
   syncControls();
+  flashDials(Object.keys(patch));
   generate();
+}
+
+// the dials that changed glow for a moment, so Random reads as an action
+function flashDials(keys) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  for (const key of keys) {
+    const el = els[key];
+    if (!el) continue;
+    el.classList.remove('flash');
+    void el.offsetWidth;
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 700);
+  }
 }
 
 function doEvolve() {
@@ -791,22 +825,25 @@ function importJson() {
   els.fileinput.click();
 }
 
+function applySong(song) {
+  if (!song || !song.tracks || !song.presets || !song.seed) throw new Error('not a song file');
+  state.song = song;
+  state.presets = normalisePresets(song.presets);
+  state.seed = song.seed;
+  syncControls();
+  renderMeta();
+  renderSections();
+  renderSummary();
+  drawViz(0);
+  checkVersion(song.composerVersion, 'song file');
+  toast(`Imported “${song.title}”`);
+}
+
 async function onFilePicked() {
   const file = els.fileinput.files?.[0];
   if (!file) return;
   try {
-    const text = await file.text();
-    const song = JSON.parse(text);
-    if (!song || !song.tracks || !song.presets || !song.seed) throw new Error('not a song file');
-    state.song = song;
-    state.presets = normalisePresets(song.presets);
-    state.seed = song.seed;
-    syncControls();
-    renderMeta();
-    renderSections();
-    renderSummary();
-    drawViz(0);
-    toast(`Imported “${song.title}”`);
+    applySong(JSON.parse(await file.text()));
   } catch (err) {
     fail('Import', err);
     toast('That file is not a MusicGen song');
@@ -862,6 +899,25 @@ async function doSave() {
   }
 }
 
+async function exportLibrary() {
+  try {
+    const items = await libraryList();
+    if (!items.length) { toast('Library is empty'); return; }
+    const files = items.map((it) => ({
+      name: `${slug(it.title)}-${it.id.slice(0, 8)}.musicgen.json`,
+      data: new TextEncoder().encode(JSON.stringify(it.song || { presets: it.presets, seed: it.seed, title: it.title }, null, 2)),
+    }));
+    files.push({
+      name: 'library.txt',
+      data: new TextEncoder().encode(items.map((it) => `${it.title}\t${it.style}\t${it.mood}\t${it.bpm}\t${it.seed}`).join('\n')),
+    });
+    download(new Blob([zipStore(files)], { type: 'application/zip' }), 'musicgen-library.zip');
+    toast(`${items.length} songs exported`);
+  } catch (err) {
+    fail('Library export', err);
+  }
+}
+
 async function openLibrary() {
   const render = async (query = '') => {
     els.libraryList.innerHTML = '';
@@ -886,6 +942,7 @@ async function openLibrary() {
           state.seed = it.seed;
           syncControls();
           generate();
+          checkVersion(it.composerVersion, 'saved song');
           els.library.close();
         });
         const rename = document.createElement('button');
@@ -961,6 +1018,7 @@ function wireActions() {
     if (act === 'undo') undo();
     if (act === 'redo') redo();
     if (act === 'library') openLibrary();
+    if (act === 'exportlib') exportLibrary();
     if (act === 'install') doInstall();
     if (act === 'help') els.help.showModal();
   });
@@ -1018,6 +1076,22 @@ function wireActions() {
   });
 }
 
+function auditionNote(note) {
+  try {
+    ensurePlayer();
+    if (player.ctx.state === 'suspended') player.ctx.resume();
+    const track = note.track === 'drums' ? 'lead' : note.track;
+    const spec = player.graph.tech.instruments[track] || player.graph.tech.instruments.lead;
+    const when = player.ctx.currentTime + 0.02;
+    synthVoice(player.ctx, player.graph.tracks[track].input, {
+      when, dur: 0.4, freq: freqOf(note.p), vel: 0.85, spec, brightness: 0.95,
+    });
+    els.live.textContent = `Note ${note.p}, ${note.track}`;
+  } catch (err) {
+    fail('Audition', err);
+  }
+}
+
 function zoomRoll(factor) {
   if (!state.song) return;
   const totalBeats = state.song.bars * state.song.beatsPerBar;
@@ -1047,11 +1121,22 @@ async function boot() {
       state.presets = normalisePresets({ ...DEFAULT_PRESETS, ...decoded.presets });
       state.seed = decoded.seed;
       syncControls();
+      checkVersion(decoded.composerVersion, 'link');
     }
   }
 
   applyTheme(state.ui.theme || 'system', { redraw: false });
   generate();
+
+  if (!state.ui.seenIntro) {
+    notice('Press ▶ to hear it · Random rolls new dials · Export takes the song to a DAW. '
+      + 'Tap this line to dismiss.');
+    els.notice.addEventListener('click', () => {
+      notice('');
+      state.ui.seenIntro = true;
+      persist();
+    }, { once: true });
+  }
   if (vizMode === 'art') setIdleAnimation();
 
   // restore the last playback position (not playing — browsers want a gesture)
@@ -1070,6 +1155,35 @@ async function boot() {
   const params = new URLSearchParams(location.search);
   if (params.get('action') === 'random') doRandom();
   if (params.get('action') === 'play') setTimeout(() => play(), 300);
+
+  // share target: another app shared a link (or text) with us
+  const shared = `${params.get('url') || ''} ${params.get('text') || ''}`;
+  const sharedSeed = shared.match(/#s=([A-Za-z0-9_-]+)/);
+  if (sharedSeed) {
+    const decoded = decodeState(sharedSeed[1]);
+    if (decoded) {
+      state.presets = normalisePresets({ ...DEFAULT_PRESETS, ...decoded.presets });
+      state.seed = decoded.seed;
+      syncControls();
+      generate();
+      checkVersion(decoded.composerVersion, 'shared link');
+      toast('Opened the shared song');
+    }
+  }
+
+  // file handler: the OS opened a .json song with us
+  if (globalThis.launchQueue) {
+    globalThis.launchQueue.setConsumer(async (launch) => {
+      for (const handle of launch.files || []) {
+        try {
+          const song = JSON.parse(await handle.text());
+          applySong(song);
+        } catch (err) {
+          fail('Opening file', err);
+        }
+      }
+    });
+  }
 
   if ('serviceWorker' in navigator) {
     try {

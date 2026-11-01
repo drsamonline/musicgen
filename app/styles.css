@@ -339,6 +339,25 @@ button[aria-pressed="true"] {
   transition: width 80ms linear;
 }
 
+.notice {
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-2) 40%, transparent);
+  background: var(--accent-2-soft);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.notice[hidden] { display: none; }
+
+.flash { animation: dialflash 620ms ease; }
+@keyframes dialflash {
+  0% { box-shadow: 0 0 0 0 var(--accent); }
+  40% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
 /* ---------------------------------------------------------------- controls */
 .controls {
   background: var(--panel);
@@ -574,6 +593,16 @@ dd { margin: 0; }
 @media (max-width: 380px) {
   .row { grid-template-columns: 58px minmax(0, 1fr) auto auto; }
   #evolve, #mutate { display: none; }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --line: rgba(200, 215, 255, 0.55);
+    --line-strong: rgba(220, 230, 255, 0.85);
+    --muted: #c3cbdd;
+    --dim: #a9b3c9;
+  }
+  button, select, .sec { border-width: 2px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

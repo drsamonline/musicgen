@@ -7,7 +7,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-c6f24e.svg)](LICENSE)
 [![dependencies: 0](https://img.shields.io/badge/dependencies-0-9aa8ff.svg)](#)
 [![tempo: 20–500 BPM](https://img.shields.io/badge/tempo-20--500%20BPM-9aa8ff.svg)](#)
-[![size: 55 KB gzipped](https://img.shields.io/badge/size-57%20KB%20gzipped-9aa8ff.svg)](#)
+[![size: 61 KB gzipped](https://img.shields.io/badge/size-61%20KB%20gzipped-9aa8ff.svg)](#)
 [![PWA: offline-first](https://img.shields.io/badge/PWA-offline--first-c6f24e.svg)](#)
 [![web audio api](https://img.shields.io/badge/web%20audio-api-ff9f6b.svg)](#)
 
@@ -48,7 +48,7 @@ Then use your browser's **Install** / **Add to Home Screen** (iOS: Share → Add
 
 **The composer** — eleven stages, each testable: key and mode → harmonic grid (2nd-order Markov over style progressions, modal interchange) → voicing with a voice-leading solver → bass → drums (groove templates, Euclidean layers, phrase fills) → motif → development transforms → pad and counter-line → arp → humanise → tension curve.
 
-**The presets** — 11 styles, 10 moods, 10 themes, 8 song types, 7 synthesis technologies, plus a compatibility table that maps styles to allowed moods and engines. Tempo runs **20–500 BPM**; per-track locks freeze the drums or the melody while you reroll everything else.
+**The presets** — 11 styles, 10 moods, 10 themes, 8 song types, 7 synthesis technologies, plus a compatibility table that maps styles to allowed moods and engines. Tempo runs **20–500 BPM**; per-track locks freeze the drums or the melody while you reroll everything else. Every share link carries the composer version, so an old seed can tell you it will sound different instead of silently lying.
 
 **The synthesis** — subtractive, FM, chiptune (real `PeriodicWave` pulses), additive, wavetable, Karplus-Strong and noise instruments; a drum kit built from oscillators and filtered noise; generated convolution reverb, tempo-synced delay and chorus; glue compressor and limiter on the master, mono bass below 120 Hz, sidechain ducking for EDM, a filter envelope and velocity-to-timbre on every voice, analogue drift, and a stereo-width tap. A voice pool steals the quietest voice with a fade; the scheduler runs a 200 ms lookahead and skips late notes instead of firing them in a burst.
 
@@ -72,9 +72,10 @@ npm run audit
 ## Tests
 
 ```bash
-npm test              # 30 unit tests, no browser needed
-npm run test:browser  # 70 tests in real Chromium with real Web Audio
+npm test              # 32 unit tests, no browser needed
+npm run test:browser  # 73 tests in real Chromium with real Web Audio
 npm run lint          # determinism lint: no Math.random / Date.now in pure modules
+npm run budget        # shell size, precache completeness, no external requests
 npm run shots         # regenerate docs/screenshots
 npm run audit         # axe + app checks, light and dark
 ```
@@ -88,6 +89,7 @@ The suite asserts, rather than claims:
 - tempo — 20 BPM and 500 BPM both compose, render and validate; the range is clamped at both ends
 - audio integrity — a dense render has no silent holes, no voices are dropped, the pool stays inside its cap at 7/8 and 500 BPM
 - loudness regression — three styles rendered offline and checked against their LUFS target and peak ceiling
+- mix balance — every track rendered solo, checked for being audible, not buried, and not letting the drums dominate
 - the app — theme switching and persistence, service worker caching, visualiser modes painting, stems quieter than the mix, track locks surviving a new seed
 - the landing page — composing, drawing and linking its specimen
 
@@ -120,6 +122,10 @@ scripts/              screenshots.mjs, audit.mjs
 docs/ENHANCEMENTS.md  the backlog
 ```
 
+## Contributing
+
+`CONTRIBUTING.md` has the one rule that matters (determinism in `src/core/`) and the five checks a PR must pass. `docs/LISTENING.md` is the golden-seed log — the place where the automated tests stop and a person listens.
+
 ## Design notes
 
 Three decisions are worth knowing about, because they were made against the obvious choice:
@@ -128,7 +134,7 @@ Three decisions are worth knowing about, because they were made against the obvi
 
 **Loudness targets are per style.** Lo-fi sits at −16 LUFS, EDM at −11, Ambient at −18. Normalising everything to a single streaming number would flatten exactly the character the styles are for.
 
-**No AudioWorklets in v1.** Granular and physical-modelling worklets are where a generative-audio project goes to die. Everything here uses native nodes, which is why it runs on a mid-range phone and why the whole app is 57 KB gzipped.
+**No AudioWorklets in v1.** Granular and physical-modelling worklets are where a generative-audio project goes to die. Everything here uses native nodes, which is why it runs on a mid-range phone and why the whole app is 61 KB gzipped.
 
 ## Known gaps
 

@@ -1,5 +1,5 @@
 {
-  "name": "MusicGen — generative composer",
+  "name": "MusicGen \u2014 generative composer",
   "short_name": "MusicGen",
   "description": "A pocket-sized generative composer. Finished-sounding, reproducible, exportable music in one tap. No accounts, no server, no samples.",
   "start_url": "./?src=pwa",
@@ -49,5 +49,44 @@
       "short_name": "Play",
       "url": "./?action=play"
     }
-  ]
+  ],
+  "screenshots": [
+    {
+      "src": "screenshots/mobile.png",
+      "sizes": "645x1400",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "The studio on a phone: piano roll, chord labels and preset dials"
+    },
+    {
+      "src": "screenshots/desktop.png",
+      "sizes": "1362x1017",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "The studio on a desktop: two columns of dials, spectrum and section timeline"
+    }
+  ],
+  "share_target": {
+    "action": "./",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": {
+        "application/json": [
+          ".json",
+          ".musicgen.json"
+        ]
+      }
+    }
+  ],
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  }
 }

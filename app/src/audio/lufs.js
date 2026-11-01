@@ -71,6 +71,29 @@ export function integratedLufs(channelData, sampleRate) {
   return loud(mean2);
 }
 
+// 4x oversampled true peak (Catmull-Rom). Sample peak under-reports the
+// peak between samples, which is exactly what a limiter is judged on.
+export function truePeakOversampled(channelData, factor = 4) {
+  let peak = 0;
+  for (const ch of channelData) {
+    const n = ch.length;
+    for (let i = 1; i < n - 2; i++) {
+      const p0 = ch[i - 1], p1 = ch[i], p2 = ch[i + 1], p3 = ch[i + 2];
+      for (let k = 0; k < factor; k++) {
+        const t = k / factor;
+        const t2 = t * t;
+        const t3 = t2 * t;
+        const v = 0.5 * ((2 * p1) + (-p0 + p2) * t
+          + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
+          + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+        const a = Math.abs(v);
+        if (a > peak) peak = a;
+      }
+    }
+  }
+  return peak > 0 ? 20 * Math.log10(peak) : -Infinity;
+}
+
 export function truePeak(channelData) {
   let peak = 0;
   for (const ch of channelData) {

@@ -218,6 +218,48 @@ test('golden seeds are stable', () => {
   eq(JSON.stringify(hashes), JSON.stringify(snapshot), 'golden seeds drifted');
 });
 
+console.log('\nProperty checks');
+test('random preset/seed pairs stay inside the invariants', () => {
+  const rng = new Rng('properties');
+  let valid = 0;
+  const N = 40;
+  for (let i = 0; i < N; i++) {
+    const presets = {
+      style: STYLE_IDS[rng.int(STYLE_IDS.length)],
+      mood: MOOD_IDS[rng.int(MOOD_IDS.length)],
+      theme: THEME_IDS[rng.int(THEME_IDS.length)],
+      tech: TECH_IDS[rng.int(TECH_IDS.length)],
+      bpm: 20 + rng.int(481),
+      type: TYPE_IDS[rng.int(TYPE_IDS.length)],
+      timeSig: [[4, 4], [3, 4], [6, 8], [5, 4], [7, 8]][rng.int(5)],
+    };
+    const seed = `p${i}`;
+    const song = compose(presets, seed);
+    assert(song.durationSec > 0 && Number.isFinite(song.durationSec), 'bad duration');
+    assert(song.bars > 0, 'no bars');
+    for (const [track, notes] of Object.entries(song.tracks)) {
+      for (const n of notes) {
+        assert(Number.isFinite(n.t) && Number.isFinite(n.v), `${track}: non-finite note`);
+        if (track !== 'drums') assert(n.p >= 21 && n.p <= 108, `${track}: pitch ${n.p} out of range`);
+      }
+    }
+    eq(JSON.stringify(compose(presets, seed)), JSON.stringify(song), 'not deterministic');
+    if (validateSong(song).ok) valid++;
+  }
+  assert(valid / N >= 0.9, `only ${valid}/${N} valid`);
+});
+test('chord voicings never exceed the instrument range', () => {
+  const rng = new Rng('ranges');
+  for (let i = 0; i < 20; i++) {
+    const song = compose({ style: 'jazz', mood: MOOD_IDS[rng.int(MOOD_IDS.length)], theme: 'space', tech: 'analog', bpm: 120, type: 'full' }, `r${i}`);
+    for (const sec of song.sections) {
+      for (const ch of sec.chords) {
+        for (const p of ch.voicing) assert(p >= 40 && p <= 92, `voicing pitch ${p} out of range`);
+      }
+    }
+  }
+});
+
 console.log('\nExport');
 test('WAV header and length are correct', () => {
   const frames = 1000;

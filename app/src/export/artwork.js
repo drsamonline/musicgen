@@ -1,5 +1,6 @@
 // Share URLs + procedural cover art.
 import { Rng } from '../core/rng.js';
+import { COMPOSER_VERSION } from '../core/composer.js';
 
 const SHORT = ['s', 'm', 't', 'h', 'b', 'y', 'k', 'i', 'w', 'a', 'p', 'c', 'd'];
 
@@ -8,7 +9,7 @@ export function encodeState(presets, seed) {
     s: presets.style, m: presets.mood, t: presets.theme, h: presets.tech,
     b: presets.bpm, y: presets.type, k: presets.timeSig?.join('x'),
     i: presets.intensityBias || 0, w: presets.swing ?? null,
-    a: presets.arp ? 1 : 0, p: seed,
+    a: presets.arp ? 1 : 0, p: seed, v: COMPOSER_VERSION,
   };
   const json = JSON.stringify(compact);
   const b64 = btoa(unescape(encodeURIComponent(json)))
@@ -32,6 +33,7 @@ export function decodeState(str) {
         arp: !!c.a,
       },
       seed: String(c.p || ''),
+      composerVersion: c.v == null ? null : Number(c.v),
     };
   } catch {
     return null;

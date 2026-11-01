@@ -9,7 +9,7 @@ export const state = {
   locks: { style: false, mood: false, theme: false, tech: false, type: false, bpm: false },
   seed: randomSeed(12),
   song: null,
-  ui: { volume: 0.9, vizMode: 'roll', advanced: false, theme: 'system', muted: false, position: 0 },
+  ui: { volume: 0.9, vizMode: 'roll', advanced: false, theme: 'system', muted: false, position: 0, seenIntro: false },
 };
 
 const listeners = new Set();

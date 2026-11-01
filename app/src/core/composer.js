@@ -19,6 +19,11 @@ const TONIC_WEIGHTS = [
   3, 1, 3, 1, 3, 3, 1, 3, 1, 3, 2, 2,
 ];
 
+// Bump this whenever the composer's output changes for the same inputs.
+// Seeds and share links carry it so an old link can say "this will sound
+// different now" instead of silently lying.
+export const COMPOSER_VERSION = 2;
+
 export const BPM_MIN = 20;
 export const BPM_MAX = 500;
 
@@ -660,6 +665,7 @@ export function compose(rawPresets, seed) {
 
   return {
     v: 1,
+    composerVersion: COMPOSER_VERSION,
     seed: String(seed),
     presets,
     title: makeTitle(rng.fork('title'), theme),

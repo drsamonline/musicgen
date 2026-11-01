@@ -24,7 +24,7 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 | 1.12 | `[x]` Melody instrument doubling (lead + octave / fifth) per style | S | M | Cheap thickness for Rock/Folk. |
 | 1.13 | `[x]` Chord rhythm variation (anticipations, pushes) | S | H | Right now chords always land on the bar line. |
 | 1.14 | `[x]` Intro/outro generators that fade the arrangement rather than the volume | M | M | Currently an outro is just a quiet section. |
-| 1.15 | `[ ]` Golden-seed listening log with notes | S | H | A file of "seed → what's wrong with it" is worth more than another feature. |
+| 1.15 | `[x]` Golden-seed listening log with notes | S | H | A file of "seed → what's wrong with it" is worth more than another feature. |
 | 1.16 | `[x]` Tempo range 20–500 BPM | S | H | Was 40–200. Delay line, drum subdivision, swing and scheduler all had to survive 20 and 500; both are in the test suite now. |
 
 ## 2. Synthesis & sound design
@@ -40,7 +40,7 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 | 2.7 | `[~]` Per-track FX: per-track reverb size, delay division, drive | M | H | Sends are global right now. |
 | 2.8 | `[ ]` Instrument-level preset variants (e.g. three bass flavours per tech) | M | M | Multiplies the palette without new engines. |
 | 2.9 | `[x]` Velocity → timbre mapping (brighter on hard hits) | S | H | Velocity currently only changes gain. |
-| 2.10 | `[ ]` Legato/glide for mono lead and bass | S | M | |
+| 2.10 | `[x]` Legato/glide for mono lead and bass | S | M | |
 | 2.11 | `[~]` Noise-bed generator for Ambient/Drone themes | S | M | The theme already claims texture density. |
 | 2.12 | `[x]` Stereo width per track (Haas + detune) with mono-bass crossover | M | H | Spec'd; currently panning only. |
 
@@ -49,9 +49,9 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 | # | Item | Effort | Impact | Notes |
 |---|------|--------|--------|-------|
 | 3.1 | `[x]` Real mono-bass crossover (LR4 split below 120 Hz) | S | M | Now it is just "bass is panned centre". |
-| 3.2 | `[~]` Mix-balance acceptance test (band energy per track) | S | H | Loudness is asserted; balance is not. This is the gap that lets drums run over everything. |
-| 3.3 | `[ ]` Per-style EQ curve instead of one shelf pair | M | M | |
-| 3.4 | `[ ]` True-peak oversampling (4×) in the measurement | M | M | Current peak is sample peak. |
+| 3.2 | `[x]` Mix-balance acceptance test (band energy per track) | S | H | Loudness is asserted; balance is not. This is the gap that lets drums run over everything. |
+| 3.3 | `[x]` Per-style EQ curve instead of one shelf pair | M | M | |
+| 3.4 | `[x]` True-peak oversampling (4×) in the measurement | M | M | Current peak is sample peak. |
 | 3.5 | `[x]` LUFS short-term meter in the UI | S | M | Makes the loudness story visible. |
 | 3.6 | `[x]` A/B against the previous generation, with a level-matched toggle | M | H | The fastest way to judge a composer change. |
 | 3.7 | `[x]` Export normalisation options (target / raw / streaming preset) | S | M | |
@@ -70,7 +70,7 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 | 4.7 | `[ ]` Move the scheduler to an AudioWorklet clock | M | M | setInterval jitters under load. |
 | 4.8 | `[ ]` Offload rendering to a Worker with OfflineAudioContext | L | M | Keeps the UI at 60 fps during a 3-minute export. |
 | 4.9 | `[ ]` Typed-array note storage (SoA) for large songs | M | L | Only matters past ~10k notes. |
-| 4.10 | `[~]` Startup budget check in CI (gzipped size + first-audio latency) | S | M | |
+| 4.10 | `[x]` Startup budget check in CI (gzipped size + first-audio latency) | S | M | |
 
 ## 5. UI / UX
 
@@ -80,11 +80,11 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 | 5.2 | `[x]` Four visualiser modes, theme-aware | M | H | |
 | 5.3 | `[x]` Undo/redo of preset changes | S | M | |
 | 5.4 | `[x]` Drag-to-zoom and scroll on the piano roll | M | H | The roll is a picture right now, not a timeline. |
-| 5.5 | `[ ]` Click a note in the roll to audition it | S | M | |
+| 5.5 | `[x]` Click a note in the roll to audition it | S | M | |
 | 5.6 | `[x]` Loop a section (timeline has jump, not loop) | S | M | |
 | 5.7 | `[x]` Track-level locks (lock the drums, reroll the melody) | M | H | Spec'd P2; needs per-track seed derivation, which the composer already supports. |
-| 5.8 | `[ ]` Random with an animation of the dials moving | S | L | The spec asks for it; it is polish, not power. |
-| 5.9 | `[ ]` Onboarding: three taps that show Generate → Random → Export | S | M | |
+| 5.8 | `[x]` Random with an animation of the dials moving | S | L | The spec asks for it; it is polish, not power. |
+| 5.9 | `[x]` Onboarding: three taps that show Generate → Random → Export | S | M | |
 | 5.10 | `[x]` Empty/error states with a retry rather than a toast | S | M | |
 | 5.11 | `[x]` Session restore: reopen the app on the last song and position | S | M | |
 | 5.12 | `[~]` A proper settings sheet (volume, theme, reduced motion, defaults) | S | M | |
@@ -98,7 +98,7 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 | 6.3 | `[x]` Text alternative for the piano roll (a note list per section) | M | H | A canvas is not "a visual representation" for a screen reader. |
 | 6.4 | `[x]` Throttle `aria-live` announcements during slider drags | S | M | Currently every debounced regeneration announces. |
 | 6.5 | `[x]` Keyboard-only section timeline (arrow keys, Home/End) | S | M | |
-| 6.6 | `[ ]` Respect `prefers-contrast: more` | S | L | |
+| 6.6 | `[x]` Respect `prefers-contrast: more` | S | L | |
 | 6.7 | `[ ]` Focus-visible audit on the sheet and dialogs | S | L | |
 | 6.8 | `[ ]` Screen-reader pass with NVDA/VoiceOver on a real device | M | H | Automated checks cannot hear it. |
 
@@ -108,13 +108,13 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 |---|------|--------|--------|-------|
 | 7.1 | `[x]` Custom install prompt (`beforeinstallprompt`) + iOS instructions | S | M | |
 | 7.2 | `[x]` Offline-ready badge once the SW controls the page | S | M | |
-| 7.3 | `[ ]` Share target (receive a seed from the OS share sheet) | M | M | |
-| 7.4 | `[ ]` File Handling API for `.musicgen.json` | M | M | |
+| 7.3 | `[x]` Share target (receive a seed from the OS share sheet) | M | M | |
+| 7.4 | `[x]` File Handling API for `.musicgen.json` | M | M | |
 | 7.5 | `[ ]` Protocol handler `web+musicgen://` | S | L | |
 | 7.6 | `[~]` Background-audio honesty: MediaSession + keep-alive, or say so in the UI | M | H | Some mobile browsers suspend on lock. |
 | 7.7 | `[ ]` File System Access for choosing the export folder | M | L | Chromium only. |
 | 7.8 | `[x]` Update flow: version bump → "refresh to update" toast | S | M | |
-| 7.9 | `[ ]` Screenshot list in the manifest for richer install UI | S | L | |
+| 7.9 | `[x]` Screenshot list in the manifest for richer install UI | S | L | |
 | 7.10 | `[ ]` Optional sync via a file the user owns (no server) | L | M | Keep the zero-account promise. |
 
 ## 8. Export & interop
@@ -138,7 +138,7 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 | 9.2 | `[x]` Store the full Song JSON, not just presets + seed | S | H | Then a saved song is a file you can diff. |
 | 9.3 | `[x]` Rename, tag, search, duplicate, export JSON | M | M | |
 | 9.4 | `[x]` Storage-quota handling with a visible usage meter | S | M | |
-| 9.5 | `[ ]` Bulk export of the library as a zip | S | L | |
+| 9.5 | `[x]` Bulk export of the library as a zip | S | L | |
 | 9.6 | `[ ]` Cross-device handoff via the seed link only (no sync) | S | M | |
 
 ## 10. Testing & quality
@@ -152,7 +152,7 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 | 10.5 | `[x]` Voice-cap stress test (7/8 at 180 BPM, full song) | S | M | |
 | 10.6 | `[ ]` Visual regression on the studio in both themes | M | M | |
 | 10.7 | `[x]` Custom lint rule banning `Math.random`/`Date.now` in `core/` | S | M | The determinism guarantee deserves enforcement. |
-| 10.8 | `[ ]` Property-based tests for the theory helpers | M | M | |
+| 10.8 | `[x]` Property-based tests for the theory helpers | M | M | |
 
 ## 11. Docs & distribution
 
@@ -162,7 +162,7 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 | 11.2 | `[x]` README with badges and a screenshot gallery | S | H | |
 | 11.3 | `[x]` Audio examples on the landing page (three seeds, ~20 s each) | S | H | The page sells a sound; it should play more than one. |
 | 11.4 | `[ ]` A 60-second "how the composer works" walkthrough with diagrams | M | M | |
-| 11.5 | `[ ]` CONTRIBUTING + issue templates | S | L | |
+| 11.5 | `[x]` CONTRIBUTING + issue templates | S | L | |
 | 11.6 | `[ ]` Changelog generated from commit messages | S | L | |
 
 ## 12. Product decisions still open
@@ -174,6 +174,20 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 5. **Do we want a composer version pin in the UI?** If the algorithm changes, every existing seed changes with it — that is a user-visible break worth surfacing.
 
 ---
+
+## What v2.1.0 closed
+
+- **Versioned seeds.** The composer now stamps `COMPOSER_VERSION` into every share link, song file and library entry. An old link says "this was made with composer v1 — the notes will differ now" instead of silently playing something else. (Reproducing the *old* output would mean keeping every historical composer; that is a decision, not a bug fix.)
+- **Legato.** Adjacent bass and lead notes glide instead of retriggering.
+- **Per-style EQ.** Two shelves and a mid band per style — the difference between "a mix" and "a lo-fi mix".
+- **True peak.** 4× oversampled (Catmull-Rom), so the −1 dBTP ceiling means what it says.
+- **Mix balance is now a test**, not an opinion: every track is rendered solo and checked for being audible, not buried, and not letting the drums dominate.
+- **Note audition** — tap a note in the roll to hear it.
+- **Random flashes the dials it changed**; a first-run hint says what the three buttons do.
+- **`prefers-contrast: more`** support.
+- **Share target, file handlers and manifest screenshots** — the app can receive a seed from the OS share sheet and be opened with a `.json` song.
+- **Library bulk export** as a zip of song JSON.
+- **Budget script** — shell size, precache completeness and "no external requests" are now enforced, not asserted in a README.
 
 ## What v2.0.0 closed
 
