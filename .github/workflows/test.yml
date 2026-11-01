@@ -24,9 +24,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Install Chrome for Testing
-        run: npm install --no-save puppeteer@23
-      - name: Browser tests (real Web Audio, offline render, PWA)
+      - name: Install Chrome for Testing + axe-core
+        run: npm install --no-save puppeteer@23 axe-core
+      - name: Browser tests (real Web Audio, offline render, PWA, themes)
         run: node tests/browser/test.mjs
-      - name: Accessibility audit (axe, both themes)
-        run: npm install --no-save axe-core && node scripts/audit.mjs
+      - name: Accessibility audit (axe, light + dark)
+        run: node scripts/audit.mjs

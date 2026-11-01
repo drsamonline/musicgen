@@ -64,6 +64,7 @@ The studio ships **light and dark**, and the choice is yours, not the OS's: the 
 `npm run audit` runs axe-core (WCAG 2.1 A/AA + best practice) over the studio in **dark, light and desktop**, and over the landing page, then adds app-level checks axe cannot know about: duplicate ids, unlabelled controls, canvases without an accessible name, missing `lang`, console errors. Current state: **zero violations, zero app-level issues, zero console errors**.
 
 ```bash
+npm install --no-save axe-core puppeteer   # audit + screenshot tooling only
 npm run audit
 ```
 

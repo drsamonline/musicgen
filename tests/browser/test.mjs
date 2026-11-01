@@ -11,8 +11,12 @@ async function loadPuppeteer() {
     const mod = await import('puppeteer');
     return mod.default ?? mod;
   } catch { /* fall through to the sandbox's global copy */ }
-  const mod = await import('/usr/lib/node_modules/puppeteer-core/lib/cjs/puppeteer/puppeteer-core.js');
-  return mod.default ?? mod;
+  try {
+    const mod = await import('/usr/lib/node_modules/puppeteer-core/lib/cjs/puppeteer/puppeteer-core.js');
+    return mod.default ?? mod;
+  } catch {
+    throw new Error('puppeteer not found. Run: npm install --no-save puppeteer axe-core');
+  }
 }
 
 function launchOptions(extra = []) {

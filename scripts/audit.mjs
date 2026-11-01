@@ -11,8 +11,12 @@ async function loadPuppeteer() {
     const mod = await import('puppeteer');
     return mod.default ?? mod;
   } catch { /* fall through */ }
-  const mod = await import('/usr/lib/node_modules/puppeteer-core/lib/cjs/puppeteer/puppeteer-core.js');
-  return mod.default ?? mod;
+  try {
+    const mod = await import('/usr/lib/node_modules/puppeteer-core/lib/cjs/puppeteer/puppeteer-core.js');
+    return mod.default ?? mod;
+  } catch {
+    throw new Error('puppeteer not found. Run: npm install --no-save puppeteer axe-core');
+  }
 }
 
 function launchOptions() {
@@ -23,7 +27,12 @@ function launchOptions() {
 }
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const AXE = fs.readFileSync(path.join(ROOT, 'node_modules', 'axe-core', 'axe.min.js'), 'utf8');
+const AXE_PATH = path.join(ROOT, 'node_modules', 'axe-core', 'axe.min.js');
+if (!fs.existsSync(AXE_PATH)) {
+  console.error('axe-core not installed. Run: npm install --no-save axe-core');
+  process.exit(2);
+}
+const AXE = fs.readFileSync(AXE_PATH, 'utf8');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 
 const server = http.createServer((req, res) => {
