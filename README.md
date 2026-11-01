@@ -6,7 +6,8 @@
 [![a11y: axe clean](https://img.shields.io/badge/axe%20wcag%202.1%20AA-clean-c6f24e.svg)](#accessibility--audit)
 [![license: MIT](https://img.shields.io/badge/license-MIT-c6f24e.svg)](LICENSE)
 [![dependencies: 0](https://img.shields.io/badge/dependencies-0-9aa8ff.svg)](#)
-[![size: 49 KB gzipped](https://img.shields.io/badge/size-49%20KB%20gzipped-9aa8ff.svg)](#)
+[![tempo: 20–500 BPM](https://img.shields.io/badge/tempo-20--500%20BPM-9aa8ff.svg)](#)
+[![size: 55 KB gzipped](https://img.shields.io/badge/size-57%20KB%20gzipped-9aa8ff.svg)](#)
 [![PWA: offline-first](https://img.shields.io/badge/PWA-offline--first-c6f24e.svg)](#)
 [![web audio api](https://img.shields.io/badge/web%20audio-api-ff9f6b.svg)](#)
 
@@ -47,13 +48,13 @@ Then use your browser's **Install** / **Add to Home Screen** (iOS: Share → Add
 
 **The composer** — eleven stages, each testable: key and mode → harmonic grid (2nd-order Markov over style progressions, modal interchange) → voicing with a voice-leading solver → bass → drums (groove templates, Euclidean layers, phrase fills) → motif → development transforms → pad and counter-line → arp → humanise → tension curve.
 
-**The presets** — 11 styles, 10 moods, 10 themes, 8 song types, 7 synthesis technologies, plus a compatibility table that maps styles to allowed moods and engines.
+**The presets** — 11 styles, 10 moods, 10 themes, 8 song types, 7 synthesis technologies, plus a compatibility table that maps styles to allowed moods and engines. Tempo runs **20–500 BPM**; per-track locks freeze the drums or the melody while you reroll everything else.
 
-**The synthesis** — subtractive, FM, chiptune (real `PeriodicWave` pulses), additive, wavetable, Karplus-Strong and noise instruments; a drum kit built from oscillators and filtered noise; generated convolution reverb, tempo-synced delay and chorus; glue compressor and limiter on the master. Voice cap with stealing, 25 ms lookahead scheduler.
+**The synthesis** — subtractive, FM, chiptune (real `PeriodicWave` pulses), additive, wavetable, Karplus-Strong and noise instruments; a drum kit built from oscillators and filtered noise; generated convolution reverb, tempo-synced delay and chorus; glue compressor and limiter on the master, mono bass below 120 Hz, sidechain ducking for EDM, a filter envelope and velocity-to-timbre on every voice, analogue drift, and a stereo-width tap. A voice pool steals the quietest voice with a fade; the scheduler runs a 200 ms lookahead and skips late notes instead of firing them in a burst.
 
-**The exports** — WAV (16/24/32-bit, normalised to the style's LUFS target under a −1 dBTP ceiling), per-track stems as a zip, Type-1 MIDI, 1024 px cover art, and seed links that reproduce the exact song elsewhere.
+**The exports** — WAV (16/24/32-bit, normalised to a chosen loudness target under a −1 dBTP ceiling), per-track stems as a zip with per-stem loudness in the readme, Type-1 MIDI, full song JSON (export *and* import), 1024 px cover art, and seed links that reproduce the exact song elsewhere.
 
-**The platform bits** — installable PWA, MediaSession metadata with generated artwork, screen Wake Lock during playback, four visualisers, undo/redo of preset changes, keyboard shortcuts, `prefers-reduced-motion` and `prefers-color-scheme` support, and a strict CSP (`default-src 'self'`) with zero runtime fetches.
+**The platform bits** — installable PWA with a real install prompt and an offline badge, MediaSession metadata with generated artwork, screen Wake Lock, four visualisers, a piano roll you can zoom, pan and scrub, section looping, A/B against the previous song, undo/redo, a library with search/rename/duplicate, session restore, a text song summary for screen readers, `prefers-reduced-motion` and `prefers-color-scheme` support, and a strict CSP (`default-src 'self'`) with zero runtime fetches.
 
 ## Themes
 
@@ -71,8 +72,9 @@ npm run audit
 ## Tests
 
 ```bash
-npm test              # 24 unit tests, no browser needed
-npm run test:browser  # 44 tests in real Chromium with real Web Audio
+npm test              # 30 unit tests, no browser needed
+npm run test:browser  # 70 tests in real Chromium with real Web Audio
+npm run lint          # determinism lint: no Math.random / Date.now in pure modules
 npm run shots         # regenerate docs/screenshots
 npm run audit         # axe + app checks, light and dark
 ```
@@ -83,12 +85,21 @@ The suite asserts, rather than claims:
 - musicality — 330 style × mood × seed cases through the theory validator
 - audio — an offline render measured for silence, clipping and LUFS against the style target
 - exports — WAV byte length, MIDI header and track count, zip archive structure
-- the app — theme switching and persistence, service worker caching, visualiser modes painting, stems quieter than the mix
+- tempo — 20 BPM and 500 BPM both compose, render and validate; the range is clamped at both ends
+- audio integrity — a dense render has no silent holes, no voices are dropped, the pool stays inside its cap at 7/8 and 500 BPM
+- loudness regression — three styles rendered offline and checked against their LUFS target and peak ceiling
+- the app — theme switching and persistence, service worker caching, visualiser modes painting, stems quieter than the mix, track locks surviving a new seed
 - the landing page — composing, drawing and linking its specimen
 
-## Performance notes
+## Performance and audio integrity
 
-Measured, not guessed. The reverb IR is synthesised once per context and cached (it used to be rebuilt on every pause); the saturation curve is a shared `Float32Array` instead of 1024 floats per note; analyser buffers are reused across frames; the section-intensity lookup is a binary search rather than a linear scan per note; and pausing fades the master instead of tearing down and rebuilding the audio graph.
+Measured, not guessed. The reverb IR is synthesised once per context and cached (it used to be rebuilt on every pause); the saturation curve is a shared `Float32Array` instead of 1024 floats per note; analyser buffers are reused across frames; the section-intensity lookup is a binary search; and pausing fades the master instead of rebuilding the graph.
+
+Three bugs used to make sound drop out, and they are worth naming because they were invisible:
+
+1. **The voice counter never decremented.** It ran on `setTimeout`, which is throttled in a background tab and never fires during an offline render — so `active` hit the cap and stayed there, and from then on every quiet note was silently dropped. It is now a pool pruned by time, stealing the quietest voice with a fade.
+2. **Feedback loops were never disconnected.** Karplus-Strong's delay line rang forever and the noise bed's LFO kept running; over a long session that is a CPU creep that ends in dropouts.
+3. **Late notes were fired in a burst.** Anything more than 60 ms late is now skipped instead of dumped into the present.
 
 ## Architecture
 
@@ -117,11 +128,11 @@ Three decisions are worth knowing about, because they were made against the obvi
 
 **Loudness targets are per style.** Lo-fi sits at −16 LUFS, EDM at −11, Ambient at −18. Normalising everything to a single streaming number would flatten exactly the character the styles are for.
 
-**No AudioWorklets in v1.** Granular and physical-modelling worklets are where a generative-audio project goes to die. Everything here uses native nodes, which is why it runs on a mid-range phone and why the whole app is 49 KB gzipped.
+**No AudioWorklets in v1.** Granular and physical-modelling worklets are where a generative-audio project goes to die. Everything here uses native nodes, which is why it runs on a mid-range phone and why the whole app is 57 KB gzipped.
 
 ## Known gaps
 
-Stems are summed from one shared gain rather than re-mixed per track; undo covers preset changes, not generations; sidechain pumping exists in the style data but is not wired into the graph; the library stores presets and metadata rather than note data, so a saved song recomposes from its seed; MIDI import, microtuning and a protocol handler are not implemented. The full backlog is in [docs/ENHANCEMENTS.md](docs/ENHANCEMENTS.md).
+Stems share one gain (measured on the mix) rather than being re-mixed per track — the per-stem loudness is written into the zip's readme; undo covers preset changes, not generations; note audition and a groove editor are not implemented; granular and physical modelling remain native-node approximations rather than AudioWorklets; MIDI import, microtuning, a share target and a protocol handler are still open. The full backlog, with what is done and what is not, is in [docs/ENHANCEMENTS.md](docs/ENHANCEMENTS.md).
 
 ## License
 

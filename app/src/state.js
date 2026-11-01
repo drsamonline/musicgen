@@ -9,7 +9,7 @@ export const state = {
   locks: { style: false, mood: false, theme: false, tech: false, type: false, bpm: false },
   seed: randomSeed(12),
   song: null,
-  ui: { volume: 0.9, vizMode: 'roll', advanced: false, theme: 'system', muted: false },
+  ui: { volume: 0.9, vizMode: 'roll', advanced: false, theme: 'system', muted: false, position: 0 },
 };
 
 const listeners = new Set();
@@ -81,15 +81,63 @@ function openDb() {
 export async function librarySave(song) {
   const db = await openDb();
   const id = `${song.seed}-${song.presets.style}-${song.presets.mood}`;
+  const entry = {
+    id, title: song.title, seed: song.seed, presets: song.presets,
+    style: song.presets.style, mood: song.presets.mood, bpm: song.bpm,
+    key: song.key.name, createdAt: new Date().toISOString(),
+    // the whole song, so a saved entry is a file you can diff and re-import
+    song,
+  };
+  try {
+    return await put(db, entry);
+  } catch (err) {
+    // quota: fall back to the recipe (presets + seed reproduce the same song)
+    return put(db, { ...entry, song: { ...song, tracks: undefined }, notes: 'recipe only' });
+  }
+}
+
+function put(db, entry) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put({
-      id, title: song.title, seed: song.seed, presets: song.presets,
-      style: song.presets.style, mood: song.presets.mood, bpm: song.bpm,
-      key: song.key.name, createdAt: new Date().toISOString(),
-      song: { ...song, tracks: undefined },
-    });
-    tx.oncomplete = () => resolve(id);
+    tx.objectStore(STORE).put(entry);
+    tx.oncomplete = () => resolve(entry.id);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function libraryRename(id, title) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const store = tx.objectStore(STORE);
+    const req = store.get(id);
+    req.onsuccess = () => {
+      const entry = req.result;
+      if (entry) store.put({ ...entry, title });
+    };
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function libraryDuplicate(id) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const store = tx.objectStore(STORE);
+    const req = store.get(id);
+    req.onsuccess = () => {
+      const entry = req.result;
+      if (entry) {
+        store.put({
+          ...entry,
+          id: `${entry.id}-copy-${Date.now()}`,
+          title: `${entry.title} (copy)`,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    };
+    tx.oncomplete = () => resolve(true);
     tx.onerror = () => reject(tx.error);
   });
 }

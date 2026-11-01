@@ -45,8 +45,9 @@ export function createFxBuses(ctx, song, destination) {
 
   // tempo-synced delay (dotted eighth)
   const beat = 60 / (song.bpm || 100);
-  const delay = ctx.createDelay(2);
-  delay.delayTime.value = Math.min(1.9, beat * 0.75);
+  const delay = ctx.createDelay(4);
+  // dotted eighth, clamped: at 20 BPM that is 2.25 s
+  delay.delayTime.value = Math.max(0.05, Math.min(3.9, beat * 0.75));
   const fb = ctx.createGain();
   fb.gain.value = 0.32;
   const dampen = ctx.createBiquadFilter();

@@ -1,7 +1,16 @@
 // Synthesised instruments. Every sound is generated at runtime.
 // No samples, no audio files.
+//
+// Every voice returns { end, out } so the engine's voice pool can fade it out
+// when it needs to steal a slot. Nodes are disconnected on a timer in live
+// contexts and left to the (discarded) offline context in renders — the old
+// code leaked delay lines and noise beds because nothing ever disconnected.
 
 const waveCache = new WeakMap();
+
+export function isOffline(ctx) {
+  return typeof ctx.startRendering === 'function';
+}
 
 export function pulseWave(ctx, duty) {
   let m = waveCache.get(ctx);
@@ -11,9 +20,7 @@ export function pulseWave(ctx, duty) {
   const n = 24;
   const real = new Float32Array(n);
   const imag = new Float32Array(n);
-  for (let i = 1; i < n; i++) {
-    imag[i] = (2 / (i * Math.PI)) * Math.sin(i * Math.PI * duty);
-  }
+  for (let i = 1; i < n; i++) imag[i] = (2 / (i * Math.PI)) * Math.sin(i * Math.PI * duty);
   const w = ctx.createPeriodicWave(real, imag, { disableNormalization: false });
   m.set(key, w);
   return w;
@@ -22,7 +29,8 @@ export function pulseWave(ctx, duty) {
 export function noiseBuffer(ctx, seconds = 1) {
   let m = waveCache.get(ctx);
   if (!m) { m = new Map(); waveCache.set(ctx, m); }
-  if (m.has('noise')) return m.get('noise');
+  const key = `noise:${seconds}`;
+  if (m.has(key)) return m.get(key);
   const len = Math.floor(ctx.sampleRate * seconds);
   const buf = ctx.createBuffer(1, len, ctx.sampleRate);
   const d = buf.getChannelData(0);
@@ -32,8 +40,19 @@ export function noiseBuffer(ctx, seconds = 1) {
     s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
     d[i] = (s / 4294967296) * 2 - 1;
   }
-  m.set('noise', buf);
+  m.set(key, buf);
   return buf;
+}
+
+// ---------------------------------------------------------------- helpers
+function disconnectLater(ctx, nodes, at) {
+  if (isOffline(ctx)) return;
+  const ms = Math.max(0, (at - ctx.currentTime) * 1000) + 100;
+  setTimeout(() => {
+    for (const n of nodes) {
+      try { n.disconnect(); } catch { /* already gone */ }
+    }
+  }, ms);
 }
 
 function env(param, when, dur, spec, peak) {
@@ -51,9 +70,20 @@ function env(param, when, dur, spec, peak) {
   return off + r + 0.02;
 }
 
-// The saturation curve is identical for a given amount, so build it once and
-// share the Float32Array between every voice. (This used to allocate 1024
-// floats per note, which dominated the cost of dense sections.)
+// Filter envelope: the single biggest "this is a synth" lever. Opens the
+// filter on the attack and settles back to the sustain cutoff.
+function filterEnv(filter, when, dur, spec, baseCutoff, brightness, vel) {
+  const amount = spec.filterEnv ?? 0;
+  const nyquist = 18000;
+  const velTilt = 1 + (spec.velToCutoff ?? 0) * (vel - 0.6);
+  const start = Math.min(nyquist, baseCutoff * (1 + amount * 3) * velTilt);
+  const target = Math.min(nyquist, baseCutoff * Math.max(0.25, brightness) * velTilt);
+  const attack = Math.max(0.001, spec.filterAttack ?? 0.005);
+  const decay = Math.max(0.02, spec.filterDecay ?? 0.18);
+  filter.frequency.setValueAtTime(Math.max(60, start), when);
+  filter.frequency.exponentialRampToValueAtTime(Math.max(60, target), when + attack + decay);
+}
+
 const curveCache = new Map();
 
 function saturationCurve(amount) {
@@ -78,33 +108,28 @@ function saturator(ctx, amount) {
   return ws;
 }
 
-function cleanup(nodes, stopAt, ctx) {
-  const src = nodes[0];
-  if (!src) return;
-  src.onended = () => {
-    for (const n of nodes) { try { n.disconnect(); } catch { /* already gone */ } }
-  };
-  try { src.stop(stopAt); } catch { /* already stopped */ }
-}
-
 // ---------------------------------------------------------------- voices
-export function synthVoice(ctx, dest, { when, dur, freq, vel = 0.7, spec = {}, brightness = 1, cap = { max: 48, active: 0 } }) {
+export function synthVoice(ctx, dest, opts) {
+  const {
+    when, dur, freq, vel = 0.7, spec = {}, brightness = 1,
+  } = opts;
+
   const engine = spec.engine || 'subtractive';
   const peak = Math.max(0.0005, (spec.gain ?? 0.4) * vel * brightness);
   const nodes = [];
   const out = ctx.createGain();
   out.gain.value = 1;
+
   let filter = null;
   const cutoff = Math.max(80, (spec.cutoff ?? 3000) * (0.6 + brightness * 0.7));
-
   if (engine !== 'ks' && engine !== 'noise') {
     filter = ctx.createBiquadFilter();
     filter.type = spec.filterType || 'lowpass';
-    filter.frequency.setValueAtTime(Math.min(18000, cutoff), when);
     filter.Q.value = spec.q ?? 1;
+    filterEnv(filter, when, dur, spec, cutoff, brightness, vel);
+    filter.connect(out);
   }
 
-  if (filter) filter.connect(out);
   let stopAt = when + dur + 2;
 
   if (engine === 'fm') {
@@ -121,8 +146,7 @@ export function synthVoice(ctx, dest, { when, dur, freq, vel = 0.7, spec = {}, b
     nodes.push(car, mod, modGain, filter, out);
     stopAt = env(out.gain, when, dur, spec, peak);
     car.start(when); mod.start(when);
-    cleanup([car], stopAt, ctx);
-    cleanup([mod], stopAt, ctx);
+    car.stop(stopAt); mod.stop(stopAt);
   } else if (engine === 'chiptune') {
     const osc = ctx.createOscillator();
     osc.setPeriodicWave(pulseWave(ctx, spec.duty ?? 0.5));
@@ -131,7 +155,7 @@ export function synthVoice(ctx, dest, { when, dur, freq, vel = 0.7, spec = {}, b
     nodes.push(osc, filter, out);
     stopAt = env(out.gain, when, dur, spec, peak);
     osc.start(when);
-    cleanup([osc], stopAt, ctx);
+    osc.stop(stopAt);
   } else if (engine === 'additive') {
     const count = Math.min(10, spec.harmonics ?? 8);
     const base = ctx.createGain();
@@ -144,13 +168,12 @@ export function synthVoice(ctx, dest, { when, dur, freq, vel = 0.7, spec = {}, b
       o.frequency.value = freq * h;
       g.gain.value = 1 / Math.pow(h, 1.4);
       o.connect(g).connect(base);
-      o.start(when);
       oscs.push(o);
     }
     base.connect(filter);
     nodes.push(base, filter, out, ...oscs);
     stopAt = env(out.gain, when, dur, spec, peak);
-    cleanup(oscs, stopAt, ctx);
+    for (const o of oscs) { o.start(when); o.stop(stopAt); }
   } else if (engine === 'wavetable') {
     // two detuned oscillators crossfaded — the table morph, cheaply
     const a = ctx.createOscillator();
@@ -175,14 +198,13 @@ export function synthVoice(ctx, dest, { when, dur, freq, vel = 0.7, spec = {}, b
     nodes.push(a, b, mix, filter, sweep, out);
     stopAt = env(out.gain, when, dur, spec, peak);
     a.start(when); b.start(when);
-    cleanup([a], stopAt, ctx);
-    cleanup([b], stopAt, ctx);
+    a.stop(stopAt); b.stop(stopAt);
   } else if (engine === 'ks') {
     // Karplus-Strong: noise burst into a damped delay line
     const src = ctx.createBufferSource();
     src.buffer = noiseBuffer(ctx, 0.5);
     const delay = ctx.createDelay(0.05);
-    delay.delayTime.value = 1 / freq;
+    delay.delayTime.value = Math.min(0.05, 1 / freq);
     const damp = ctx.createBiquadFilter();
     damp.type = 'lowpass';
     damp.frequency.value = Math.min(12000, 2000 + (spec.brightness ?? 0.6) * 8000);
@@ -198,8 +220,12 @@ export function synthVoice(ctx, dest, { when, dur, freq, vel = 0.7, spec = {}, b
     stopAt = env(out.gain, when, dur, { ...spec, attack: 0.002, sustain: 0.35, release: 0.4 }, peak);
     src.start(when);
     src.stop(when + 0.5);
-    cleanup([src], when + 0.5, ctx);
-    try { fb.gain.setValueAtTime(fb.gain.value, stopAt - 0.2); fb.gain.linearRampToValueAtTime(0, stopAt); } catch { /* noop */ }
+    // the feedback loop must be closed or it rings forever (it used to)
+    try {
+      const closeAt = Math.max(when + 0.1, stopAt - 0.15);
+      fb.gain.setValueAtTime(fb.gain.value, closeAt);
+      fb.gain.linearRampToValueAtTime(0, stopAt);
+    } catch { /* noop */ }
   } else if (engine === 'noise') {
     const src = ctx.createBufferSource();
     src.buffer = noiseBuffer(ctx, 2);
@@ -218,8 +244,7 @@ export function synthVoice(ctx, dest, { when, dur, freq, vel = 0.7, spec = {}, b
     stopAt = env(out.gain, when, dur, spec, peak);
     src.start(when); lfo.start(when);
     src.stop(stopAt);
-    cleanup([src], stopAt, ctx);
-    cleanup([lfo], stopAt, ctx);
+    lfo.stop(stopAt);
   } else {
     // subtractive: 2 detuned oscillators + optional sub
     const detune = spec.detune ?? 6;
@@ -242,16 +267,30 @@ export function synthVoice(ctx, dest, { when, dur, freq, vel = 0.7, spec = {}, b
       sub.frequency.value = freq / 2;
       subGain.gain.value = 0.35;
       sub.connect(subGain).connect(mix);
-      sub.start(when);
       nodes.push(sub, subGain);
-      cleanup([sub], when + dur + 1, ctx);
+      sub.start(when);
+      sub.stop(stopAt);
     }
     mix.connect(filter);
     nodes.push(o1, o2, mix, filter, out);
     stopAt = env(out.gain, when, dur, spec, peak);
     o1.start(when); o2.start(when);
-    cleanup([o1], stopAt, ctx);
-    cleanup([o2], stopAt, ctx);
+    o1.stop(stopAt); o2.stop(stopAt);
+
+    // analogue drift: a slow detune wander so repeated notes are not identical
+    const drift = spec.drift ?? 0;
+    if (drift > 0 && !isOffline(ctx)) {
+      const lfo = ctx.createOscillator();
+      const lfoGain = ctx.createGain();
+      lfo.frequency.value = 0.12 + (freq % 1) * 0.2;
+      lfoGain.gain.value = drift;
+      lfo.connect(lfoGain);
+      lfoGain.connect(o1.detune);
+      lfoGain.connect(o2.detune);
+      lfo.start(when);
+      lfo.stop(stopAt);
+      nodes.push(lfo, lfoGain);
+    }
   }
 
   if (spec.sat && spec.sat > 0.02 && engine !== 'noise') {
@@ -262,13 +301,7 @@ export function synthVoice(ctx, dest, { when, dur, freq, vel = 0.7, spec = {}, b
   } else {
     out.connect(dest);
   }
-  cap.active++;
-  const t = stopAt;
-  setTimeoutSafe(() => { cap.active = Math.max(0, cap.active - 1); }, (t - (ctx.currentTime || 0)) * 1000);
-  return stopAt;
-}
 
-// setTimeout in the browser, no-op in an OfflineAudioContext render
-function setTimeoutSafe(fn, ms) {
-  if (typeof globalThis.setTimeout === 'function') globalThis.setTimeout(fn, Math.max(0, ms));
+  disconnectLater(ctx, nodes, stopAt);
+  return { end: stopAt, out };
 }

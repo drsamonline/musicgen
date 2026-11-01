@@ -72,7 +72,7 @@ function analyserBuffer(analyser, kind) {
 const DRUM_LANE = { kick: 0.9, snare: 0.7, hat: 0.5, clap: 0.65, tom: 0.6, rim: 0.45, shaker: 0.35 };
 
 // ---------------------------------------------------------------- piano roll
-export function drawPianoRoll(canvas, song, positionSec = 0) {
+export function drawPianoRoll(canvas, song, positionSec = 0, view = null) {
   const { w, h, dpr } = fitCanvas(canvas);
   const ctx = canvas.getContext('2d');
   const pal = themePalette();
@@ -82,8 +82,10 @@ export function drawPianoRoll(canvas, song, positionSec = 0) {
   const totalBeats = song.bars * song.beatsPerBar;
   const spb = 60 / song.bpm;
   const posBeat = positionSec / spb;
-  const viewBeats = Math.min(totalBeats, 32);
-  const startBeat = Math.max(0, Math.min(totalBeats - viewBeats, posBeat - viewBeats * 0.35));
+  const viewBeats = Math.max(4, Math.min(totalBeats, view?.span ?? 32));
+  const startBeat = view
+    ? Math.max(0, Math.min(Math.max(0, totalBeats - viewBeats), view.start))
+    : Math.max(0, Math.min(totalBeats - viewBeats, posBeat - viewBeats * 0.35));
   const xOf = (beat) => ((beat - startBeat) / viewBeats) * w;
 
   const mel = ['lead', 'chords', 'bass', 'pad', 'arp'];
@@ -286,4 +288,16 @@ export function drawArt(canvas, song, analyser, now = 0) {
     ctx.fill();
   }
   ctx.globalAlpha = 1;
+}
+
+
+// Beat under a canvas x position, for scrub and zoom gestures.
+export function beatAtX(canvas, song, x, view = null) {
+  if (!song) return 0;
+  const rect = canvas.getBoundingClientRect();
+  const totalBeats = song.bars * song.beatsPerBar;
+  const span = Math.max(4, Math.min(totalBeats, view?.span ?? 32));
+  const start = view ? Math.max(0, Math.min(Math.max(0, totalBeats - span), view.start)) : 0;
+  const rel = Math.max(0, Math.min(1, (x - rect.left) / Math.max(1, rect.width)));
+  return start + rel * span;
 }

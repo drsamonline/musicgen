@@ -14,8 +14,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Unit tests (determinism, theory, export, loudness)
+      - name: Unit tests (determinism, theory, export, loudness, golden seeds)
         run: node tests/unit/run.js
+      - name: Determinism lint (no Math.random / Date.now in pure modules)
+        run: node scripts/lint-determinism.mjs
 
   browser:
     runs-on: ubuntu-latest

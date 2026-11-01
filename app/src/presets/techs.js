@@ -4,16 +4,18 @@
 const base = {
   attack: 0.01, decay: 0.18, sustain: 0.55, release: 0.35,
   cutoff: 3000, q: 1, wave: 'sawtooth', detune: 6, gain: 0.5, sat: 0.15,
+  // filter envelope + velocity-to-timbre + analogue drift
+  filterEnv: 0.35, filterAttack: 0.004, filterDecay: 0.16, velToCutoff: 0.5, drift: 2,
 };
 
 export const TECHS = {
   analog: {
     id: 'analog', name: 'Analog',
     instruments: {
-      bass: { ...base, engine: 'subtractive', wave: 'sawtooth', attack: 0.008, decay: 0.16, sustain: 0.6, release: 0.18, cutoff: 620, q: 5, octave: -12, sat: 0.35, gain: 0.62 },
-      lead: { ...base, engine: 'subtractive', wave: 'sawtooth', attack: 0.02, decay: 0.22, sustain: 0.5, release: 0.3, cutoff: 2600, q: 3, detune: 9, gain: 0.34 },
+      bass: { ...base, engine: 'subtractive', wave: 'sawtooth', attack: 0.008, decay: 0.16, sustain: 0.6, release: 0.18, cutoff: 620, q: 5, octave: -12, sat: 0.35, gain: 0.62, filterEnv: 0.55, filterDecay: 0.12, velToCutoff: 0.9, drift: 3 },
+      lead: { ...base, engine: 'subtractive', wave: 'sawtooth', attack: 0.02, decay: 0.22, sustain: 0.5, release: 0.3, cutoff: 2600, q: 3, detune: 9, gain: 0.34, filterEnv: 0.45, drift: 5 },
       chords: { ...base, engine: 'subtractive', wave: 'sawtooth', attack: 0.03, decay: 0.3, sustain: 0.5, release: 0.45, cutoff: 1800, q: 1.5, detune: 12, gain: 0.22 },
-      pad: { ...base, engine: 'subtractive', wave: 'triangle', attack: 0.6, decay: 0.8, sustain: 0.7, release: 1.6, cutoff: 1200, q: 1, detune: 16, gain: 0.2 },
+      pad: { ...base, engine: 'subtractive', wave: 'triangle', attack: 0.6, decay: 0.8, sustain: 0.7, release: 1.6, cutoff: 1200, q: 1, detune: 16, gain: 0.2, filterEnv: 0.18, drift: 6 },
     },
     drums: { engine: 'analog' },
   },
@@ -30,10 +32,10 @@ export const TECHS = {
   chiptune: {
     id: 'chiptune', name: 'Chiptune',
     instruments: {
-      bass: { ...base, engine: 'chiptune', duty: 0.5, attack: 0.001, decay: 0.09, sustain: 0.7, release: 0.06, cutoff: 2000, gain: 0.5 },
-      lead: { ...base, engine: 'chiptune', duty: 0.25, attack: 0.001, decay: 0.08, sustain: 0.6, release: 0.05, cutoff: 6000, gain: 0.28 },
-      chords: { ...base, engine: 'chiptune', duty: 0.125, attack: 0.001, decay: 0.1, sustain: 0.5, release: 0.08, cutoff: 4000, gain: 0.16 },
-      pad: { ...base, engine: 'chiptune', duty: 0.5, attack: 0.05, decay: 0.2, sustain: 0.7, release: 0.3, cutoff: 2500, gain: 0.14 },
+      bass: { ...base, engine: 'chiptune', duty: 0.5, attack: 0.001, decay: 0.09, sustain: 0.7, release: 0.06, cutoff: 2000, gain: 0.5, filterEnv: 0, drift: 0 },
+      lead: { ...base, engine: 'chiptune', duty: 0.25, attack: 0.001, decay: 0.08, sustain: 0.6, release: 0.05, cutoff: 6000, gain: 0.28, filterEnv: 0, drift: 0 },
+      chords: { ...base, engine: 'chiptune', duty: 0.125, attack: 0.001, decay: 0.1, sustain: 0.5, release: 0.08, cutoff: 4000, gain: 0.16, filterEnv: 0, drift: 0 },
+      pad: { ...base, engine: 'chiptune', duty: 0.5, attack: 0.05, decay: 0.2, sustain: 0.7, release: 0.3, cutoff: 2500, gain: 0.14, filterEnv: 0, drift: 0 },
     },
     drums: { engine: 'chiptune' },
   },

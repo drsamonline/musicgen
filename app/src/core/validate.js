@@ -29,12 +29,21 @@ export function chordAt(song, t) {
 
 // A pitch is legal if it is in the key, or a tone of the chord sounding at
 // that moment (modal interchange / chromatic chords are intentional).
+export function scaleSetAt(song, t) {
+  const sec = sectionAt(song, t);
+  const key = sec?.key || song.key;
+  return scalePcs(key.tonic, scaleOf(key.mode));
+}
+
 export function isLegalPitch(song, t, midi, scaleSet) {
-  if (scaleSet.includes(pc(midi))) return true;
+  const set = scaleSet || scaleSetAt(song, t);
+  if (set.includes(pc(midi))) return true;
   // a note on a bar line belongs to the chord either side of it
   for (const tt of [t, t - 0.51, t + 0.51]) {
     const ch = chordAt(song, tt);
     if (ch && chordPcsOf(ch).includes(pc(midi))) return true;
+    const local = scaleSetAt(song, tt);
+    if (local.includes(pc(midi))) return true;
   }
   return false;
 }
@@ -42,9 +51,8 @@ export function isLegalPitch(song, t, midi, scaleSet) {
 export function validateSong(song, opts = {}) {
   const issues = [];
   const { strict = false } = opts;
-  const tonic = song.key.tonic;
-  const scale = scaleOf(song.key.mode);
-  const scaleSet = scalePcs(tonic, scale);
+  const scaleSet = scalePcs(song.key.tonic, scaleOf(song.key.mode));
+  const setCache = new Map();
   const isJazzOrClassical = ['jazz', 'classical'].includes(song.style);
   const totalBeats = song.bars * song.beatsPerBar;
 
@@ -61,7 +69,7 @@ export function validateSong(song, opts = {}) {
       if (n.t > totalBeats + 0.5) issues.push(`${name}: note after song end`);
       if (!(n.d > 0)) issues.push(`${name}: non-positive duration`);
       if (n.p < 21 || n.p > 108) issues.push(`${name}: pitch out of MIDI range (${n.p})`);
-      if (!isLegalPitch(song, n.t, n.p, scaleSet)) illegal++;
+      if (!isLegalPitch(song, n.t, n.p, null)) illegal++;
     }
     const ratio = illegal / Math.max(1, notes.length);
     if (ratio > 0.02) issues.push(`${name}: ${(ratio * 100).toFixed(1)}% notes outside key and chord`);

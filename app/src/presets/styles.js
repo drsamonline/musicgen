@@ -244,3 +244,20 @@ export const STYLES = {
 };
 
 export const STYLE_IDS = Object.keys(STYLES);
+
+
+// Per-style behaviour added in v2: key modulation, chord rhythm variety,
+// lead doubling, stereo width. Kept separate so a style stays one object.
+export const STYLE_EXTRAS = {
+  lofi: { modulation: 0.1, chordRhythm: 0.35, doubleLead: 0, width: 0.35 },
+  cinematic: { modulation: 0.35, chordRhythm: 0.15, doubleLead: 0.2, width: 0.6 },
+  edm: { modulation: 0.15, chordRhythm: 0.2, doubleLead: 0.15, width: 0.5 },
+  ambient: { modulation: 0.2, chordRhythm: 0.1, doubleLead: 0, width: 0.7 },
+  jazz: { modulation: 0.3, chordRhythm: 0.4, doubleLead: 0, width: 0.3 },
+  chiptune: { modulation: 0.2, chordRhythm: 0.15, doubleLead: 0.5, width: 0.15 },
+  trap: { modulation: 0.1, chordRhythm: 0.25, doubleLead: 0.3, width: 0.4 },
+  rock: { modulation: 0.15, chordRhythm: 0.45, doubleLead: 0.35, width: 0.45 },
+  folk: { modulation: 0.1, chordRhythm: 0.4, doubleLead: 0.25, width: 0.35 },
+  classical: { modulation: 0.25, chordRhythm: 0.1, doubleLead: 0.15, width: 0.5 },
+  world: { modulation: 0.2, chordRhythm: 0.35, doubleLead: 0.2, width: 0.5 },
+};

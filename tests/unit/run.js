@@ -1,5 +1,5 @@
 // Unit + snapshot tests. Run: node tests/unit/run.js
-import { compose } from '../../app/src/core/composer.js';
+import { compose, normalisePresets, BPM_MIN, BPM_MAX } from '../../app/src/core/composer.js';
 import { validateSong } from '../../app/src/core/validate.js';
 import { euclid, wolfram, lsystemGrid, buildMarkov, markovNext } from '../../app/src/core/algorithms.js';
 import { Rng, mulberry32, hashString } from '../../app/src/core/rng.js';
@@ -156,6 +156,66 @@ test('random seeds are not garbage (>=90% valid)', () => {
     if (validateSong(s).ok) ok++;
   }
   assert(ok / n >= 0.9, `only ${ok}/${n} valid`);
+});
+
+console.log('\nComposer features (v2)');
+test('tempo is clamped to 20–500 BPM', () => {
+  eq(BPM_MIN, 20);
+  eq(BPM_MAX, 500);
+  eq(normalisePresets({ bpm: 1 }).bpm, 20);
+  eq(normalisePresets({ bpm: 9000 }).bpm, 500);
+});
+test('songs compose and validate at 20 and 500 BPM', () => {
+  for (const bpm of [20, 500]) {
+    const song = compose({ style: 'edm', mood: 'epic', theme: 'festival', tech: 'analog', bpm, type: 'full' }, `bpm-${bpm}`);
+    eq(song.bpm, bpm);
+    const res = validateSong(song);
+    assert(res.ok, `${bpm} BPM: ${res.issues[0]}`);
+    assert(song.durationSec > 0, 'no duration');
+  }
+});
+test('a locked track ignores the song seed', () => {
+  const base = { style: 'rock', mood: 'epic', theme: 'desert', tech: 'analog', bpm: 120, type: 'full' };
+  const locked = { ...base, lockTracks: { drums: true }, trackSeeds: { drums: 'fixed' } };
+  const a = compose(locked, 'one');
+  const b = compose(locked, 'two');
+  eq(JSON.stringify(a.tracks.drums), JSON.stringify(b.tracks.drums), 'drums changed');
+  assert(JSON.stringify(a.tracks.lead) !== JSON.stringify(b.tracks.lead), 'lead did not change');
+});
+test('sections can modulate, and the validator follows the new key', () => {
+  let modulated = 0;
+  for (let i = 0; i < 20; i++) {
+    const song = compose({ style: 'cinematic', mood: 'epic', theme: 'space', tech: 'additive', bpm: 70, type: 'full' }, `mod${i}`);
+    const keys = new Set(song.sections.map((s) => s.key.tonic));
+    if (keys.size > 1) {
+      modulated++;
+      assert(validateSong(song).ok, 'modulated song failed validation');
+    }
+  }
+  assert(modulated > 0, 'no song ever modulated');
+});
+test('A-B-A reuses the A section material', () => {
+  const song = compose({ style: 'lofi', mood: 'calm', theme: 'rain', tech: 'analog', bpm: 80, type: 'aba' }, 'alias');
+  const [a1, , a2] = song.sections;
+  eq(a1.chords.map((c) => c.symbol).join(' '), a2.chords.map((c) => c.symbol).join(' '));
+});
+test('golden seeds are stable', () => {
+  const seeds = [
+    ['lofi', 'dreamy', 'rain', 84],
+    ['edm', 'epic', 'festival', 128],
+    ['jazz', 'playful', 'nightdrive', 132],
+  ];
+  const hashes = seeds.map(([style, mood, theme, bpm]) => {
+    const song = compose({ style, mood, theme, tech: 'analog', bpm, type: 'loop' }, `golden-${style}`);
+    return `${song.title}|${song.totalNotes}|${song.bars}|${song.key.name}`;
+  });
+  // A change here is a deliberate composer change — update the snapshot on purpose.
+  const snapshot = [
+    'The Window|227|8|C lydian',
+    'Sunrise Set / Firework|332|8|F ionian',
+    'Dash Glow / Toll Road|331|8|C mixolydian',
+  ];
+  eq(JSON.stringify(hashes), JSON.stringify(snapshot), 'golden seeds drifted');
 });
 
 console.log('\nExport');

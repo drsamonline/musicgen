@@ -1,5 +1,5 @@
 // App wiring: presets, playback, visualisers, export, keyboard, persistence.
-import { compose, normalisePresets, DEFAULT_PRESETS } from './core/composer.js';
+import { compose, normalisePresets, DEFAULT_PRESETS, BPM_MIN, BPM_MAX } from './core/composer.js';
 import { validateSong } from './core/validate.js';
 import { Rng, randomSeed } from './core/rng.js';
 import { STYLES } from './presets/styles.js';
@@ -13,30 +13,37 @@ import { encodeWav, analyseBuffer, normalisationGain, download } from './export/
 import { songToMidi } from './export/midi.js';
 import { zipStore } from './export/zip.js';
 import { drawArtwork, encodeState, decodeState, shareUrl } from './export/artwork.js';
-import { drawPianoRoll, drawBars, drawWaveform, drawArt, invalidatePalette } from './visual/pianoRoll.js';
+import {
+  drawPianoRoll, drawBars, drawWaveform, drawArt, invalidatePalette, beatAtX,
+} from './visual/pianoRoll.js';
 import {
   state, loadState, subscribe, emit, setPresets, toggleLock, persist,
-  librarySave, libraryList, libraryDelete,
+  librarySave, libraryList, libraryDelete, libraryRename, libraryDuplicate,
 } from './state.js';
 
 const $ = (id) => document.getElementById(id);
 
 const els = {
-  play: $('play'), mute: $('mute'), themeToggle: $('themetoggle'), generate: $('generate'), random: $('random'),
-  evolve: $('evolve'), mutate: $('mutate'), menu: $('menu'),
-  title: $('title'), meta: $('meta'), seed: $('seed'),
+  play: $('play'), mute: $('mute'), themeToggle: $('themetoggle'), generate: $('generate'),
+  random: $('random'), evolve: $('evolve'), mutate: $('mutate'), menu: $('menu'),
+  ab: $('ab'), loop: $('loop'),
+  title: $('title'), meta: $('meta'), seed: $('seed'), offline: $('offline'),
   viz: $('viz'), progressbar: $('progressbar'),
   style: $('style'), mood: $('mood'), theme: $('theme'), bpm: $('bpm'),
   bpmout: $('bpmout'), type: $('type'), tech: $('tech'),
   timesig: $('timesig'), intensity: $('intensity'), intensityout: $('intensityout'),
   swing: $('swing'), swingout: $('swingout'), chaos: $('chaos'), chaosout: $('chaosout'),
-  arp: $('arp'), volume: $('volume'), volumeout: $('volumeout'),
-  sections: $('sections'), toast: $('toast'), live: $('live'),
+  arp: $('arp'), lockdrums: $('lockdrums'), locklead: $('locklead'),
+  volume: $('volume'), volumeout: $('volumeout'), reset: $('reset'),
+  sections: $('sections'), summary: $('summary'), toast: $('toast'), live: $('live'),
   sheet: $('menu-sheet'), help: $('help'), library: $('library'),
-  libraryList: $('library-list'),
+  libraryList: $('library-list'), searchlib: $('searchlib'), fileinput: $('fileinput'),
+  exporttarget: $('exporttarget'),
 };
 
 const VIZ_MODES = ['roll', 'bars', 'wave', 'art'];
+const THEME_MODES = ['system', 'light', 'dark'];
+const THEME_GLYPH = { system: '◐', light: '☀', dark: '☾' };
 
 let player = null;
 let rafId = null;
@@ -45,6 +52,10 @@ let artClock = 0;
 let wakeLock = null;
 let artUrl = null;
 let vizMode = state.ui.vizMode || 'roll';
+let view = null;                 // piano-roll viewport {start, span}
+let lastLufs = null;
+let deferredInstall = null;
+let announceNext = true;         // throttle the aria-live region
 
 const history = { past: [], future: [] };
 
@@ -85,10 +96,14 @@ function syncControls() {
   els.chaos.value = String(Math.round((p.chaos ?? 0.15) * 100));
   els.chaosout.textContent = `${Math.round((p.chaos ?? 0.15) * 100)}%`;
   els.arp.checked = !!p.arp;
+  els.lockdrums.checked = !!p.lockTracks?.drums;
+  els.locklead.checked = !!p.lockTracks?.lead;
   els.volume.value = String(Math.round((state.ui.volume ?? 0.9) * 100));
   els.volumeout.textContent = els.volume.value;
   els.mute.setAttribute('aria-pressed', String(!!state.ui.muted));
   els.mute.textContent = state.ui.muted ? 'Muted' : 'Mute';
+  els.loop.setAttribute('aria-pressed', String(!!player?.loop));
+  els.ab.setAttribute('aria-pressed', String(!!state.showingPrevious));
   for (const btn of document.querySelectorAll('.lock')) {
     btn.setAttribute('aria-pressed', state.locks[btn.dataset.lock] ? 'true' : 'false');
     btn.textContent = state.locks[btn.dataset.lock] ? '🔒' : '🔓';
@@ -102,13 +117,15 @@ function toast(msg) {
   els.toast.textContent = msg;
   els.toast.classList.add('show');
   clearTimeout(toast.t);
-  toast.t = setTimeout(() => els.toast.classList.remove('show'), 2400);
+  toast.t = setTimeout(() => els.toast.classList.remove('show'), 2600);
+}
+
+function fail(what, err) {
+  console.error(what, err);
+  toast(`${what} failed — see console`);
 }
 
 // ------------------------------------------------------------- theme
-const THEME_MODES = ['system', 'light', 'dark'];
-const THEME_GLYPH = { system: '◐', light: '☀', dark: '☾' };
-
 function resolveTheme(pref) {
   if (pref === 'light' || pref === 'dark') return pref;
   return matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
@@ -167,19 +184,25 @@ function redo() {
 }
 
 // ------------------------------------------------------------- generate
-function generate({ keepPosition = false } = {}) {
+function generate({ keepPosition = false, announce = true } = {}) {
   const wasPlaying = player?.playing;
   if (wasPlaying) pause();
-  const t0 = performance.now();
-  state.song = compose(state.presets, state.seed);
-  const ms = Math.round(performance.now() - t0);
-  const check = validateSong(state.song);
-  renderMeta(ms, check);
-  renderSections();
-  drawViz(keepPosition ? player?.position ?? 0 : 0);
-  updateMediaSession();
-  emit('song');
-  if (wasPlaying) play();
+  try {
+    const t0 = performance.now();
+    state.song = compose(state.presets, state.seed);
+    const ms = Math.round(performance.now() - t0);
+    const check = validateSong(state.song);
+    renderMeta(ms, check);
+    renderSections();
+    renderSummary();
+    drawViz(keepPosition ? player?.position ?? 0 : 0);
+    updateMediaSession();
+    announceNext = announce;
+    emit('song');
+    if (wasPlaying) play();
+  } catch (err) {
+    fail('Compose', err);
+  }
 }
 
 function renderMeta(ms = null, check = null) {
@@ -190,7 +213,9 @@ function renderMeta(ms = null, check = null) {
   els.meta.textContent = bits.join(' · ');
   els.seed.textContent = `#${s.seed.slice(0, 6)}`;
   els.seed.title = `${s.totalNotes} notes${ms != null ? ` · composed in ${ms} ms` : ''}`;
-  els.live.textContent = `New song: ${s.title}, ${s.key.name}, ${s.bpm} BPM`;
+  if (announceNext) {
+    els.live.textContent = `New song: ${s.title}, ${s.key.name}, ${s.bpm} BPM`;
+  }
   if (check && !check.ok) console.warn('theory validation', check.issues);
 }
 
@@ -206,14 +231,45 @@ function renderSections() {
       const at = (sec.bar * state.song.beatsPerBar * 60) / state.song.bpm;
       if (player?.playing) player.play(at);
       else { ensurePlayer(); player.startPos = at; drawViz(at); }
+      if (player?.loop) setLoopFor(sec);
+    });
+    d.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      e.preventDefault();
+      const next = e.key === 'ArrowRight' ? d.nextElementSibling : d.previousElementSibling;
+      next?.focus();
     });
     els.sections.appendChild(d);
   }
 }
 
+function renderSummary() {
+  const s = state.song;
+  if (!s || !els.summary) return;
+  const lines = s.sections.map((sec) => {
+    const chords = sec.chords.map((c) => c.symbol).join(' ');
+    const counts = ['drums', 'bass', 'chords', 'lead', 'pad']
+      .map((t) => (s.tracks[t] || []).filter((n) => n.t >= sec.bar * s.beatsPerBar
+        && n.t < (sec.bar + sec.bars) * s.beatsPerBar).length);
+    return `${sec.name} (${sec.bars} bars, intensity ${sec.intensity.toFixed(2)}): ${chords}. `
+      + `Notes — drums ${counts[0]}, bass ${counts[1]}, chords ${counts[2]}, lead ${counts[3]}, pad ${counts[4]}.`;
+  });
+  els.summary.innerHTML = '';
+  const p = document.createElement('p');
+  p.textContent = `${s.title} — ${s.key.name}, ${s.bpm} BPM, ${s.bars} bars, ${s.timeSig[0]}/${s.timeSig[1]}. `
+    + `${s.totalNotes} notes in total.`;
+  const ol = document.createElement('ol');
+  for (const line of lines) {
+    const li = document.createElement('li');
+    li.textContent = line;
+    ol.appendChild(li);
+  }
+  els.summary.append(p, ol);
+}
+
 function debouncedGenerate() {
   clearTimeout(regenTimer);
-  regenTimer = setTimeout(() => generate({ keepPosition: true }), 400);
+  regenTimer = setTimeout(() => generate({ keepPosition: true, announce: false }), 400);
 }
 
 // ------------------------------------------------------------- playback
@@ -277,11 +333,54 @@ function markSection(posSec) {
   }
 }
 
+function currentSection(posSec) {
+  if (!state.song) return null;
+  const beat = (posSec * state.song.bpm) / 60;
+  return state.song.sections.find((s) => beat >= s.bar * state.song.beatsPerBar
+    && beat < (s.bar + s.bars) * state.song.beatsPerBar) || null;
+}
+
+function setLoopFor(sec) {
+  if (!player || !sec || !state.song) return;
+  const spb = 60 / state.song.bpm;
+  player.setLoop(sec.bar * state.song.beatsPerBar * spb, (sec.bar + sec.bars) * state.song.beatsPerBar * spb);
+  syncControls();
+}
+
+function toggleLoop() {
+  if (!player) ensurePlayer();
+  if (player.loop) {
+    player.setLoop(null);
+    toast('Loop off');
+  } else {
+    const sec = currentSection(player.position) || state.song.sections[0];
+    setLoopFor(sec);
+    toast(`Looping ${sec.name}`);
+  }
+  syncControls();
+}
+
+function toggleAB() {
+  if (!state.previous) { toast('No previous song yet'); return; }
+  const cur = { presets: snapshot(), seed: state.seed };
+  state.showingPrevious = !state.showingPrevious;
+  const target = state.showingPrevious ? state.previous : cur;
+  state.previous = state.showingPrevious ? cur : state.previous;
+  const wasPlaying = player?.playing;
+  if (wasPlaying) pause();
+  state.presets = normalisePresets(target.presets);
+  state.seed = target.seed;
+  syncControls();
+  generate({ announce: false });
+  if (wasPlaying) play();
+  toast(state.showingPrevious ? 'A — previous song' : 'B — current song');
+}
+
 // ------------------------------------------------------------- platform
 async function requestWakeLock() {
   try {
     if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
-  } catch { /* not supported or denied — playback still works */ }
+  } catch { /* not supported or denied */ }
 }
 
 function releaseWakeLock() {
@@ -311,6 +410,47 @@ function updateMediaSession() {
   } catch { /* MediaSession is a bonus */ }
 }
 
+function wireInstall() {
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredInstall = e;
+    els.offline.textContent = 'install';
+    els.offline.hidden = false;
+  });
+  window.addEventListener('appinstalled', () => {
+    deferredInstall = null;
+    toast('Installed — it works offline now');
+    markOfflineReady();
+  });
+  els.offline.addEventListener('click', async () => {
+    if (deferredInstall) {
+      deferredInstall.prompt();
+      const choice = await deferredInstall.userChoice;
+      if (choice.outcome === 'accepted') toast('Installing…');
+      deferredInstall = null;
+      return;
+    }
+    markOfflineReady();
+    toast(navigator.serviceWorker?.controller ? 'Offline ready' : 'Install from your browser menu');
+  });
+}
+
+async function doInstall() {
+  if (deferredInstall) {
+    deferredInstall.prompt();
+    deferredInstall = null;
+  } else {
+    toast('Use your browser menu → Install / Add to Home Screen');
+  }
+}
+
+function markOfflineReady() {
+  if (!navigator.serviceWorker?.controller) return;
+  els.offline.textContent = 'offline ready';
+  els.offline.hidden = false;
+  els.offline.title = 'The whole app is cached — it runs with the network off';
+}
+
 // ------------------------------------------------------------- visual
 function drawViz(posSec = 0) {
   if (!state.song) return;
@@ -318,7 +458,7 @@ function drawViz(posSec = 0) {
   if (vizMode === 'bars') drawBars(els.viz, analyser);
   else if (vizMode === 'wave') drawWaveform(els.viz, analyser);
   else if (vizMode === 'art') drawArt(els.viz, state.song, analyser, artClock);
-  else drawPianoRoll(els.viz, state.song, posSec);
+  else drawPianoRoll(els.viz, state.song, posSec, view);
 }
 
 function startRaf() {
@@ -345,7 +485,6 @@ function stopRaf() {
 }
 
 function setIdleAnimation() {
-  // the generative art mode keeps breathing when playback is stopped
   if (vizMode !== 'art') return;
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (reduce) { drawViz(player?.position ?? 0); return; }
@@ -368,6 +507,64 @@ function setVizMode(mode) {
   if (vizMode === 'art') setIdleAnimation();
 }
 
+// piano roll gestures: wheel zooms, drag pans, click scrubs
+function wireRoll() {
+  let dragging = false;
+  let dragStartX = 0;
+  let dragStartView = null;
+
+  els.viz.addEventListener('wheel', (e) => {
+    if (vizMode !== 'roll' || !state.song) return;
+    e.preventDefault();
+    const totalBeats = state.song.bars * state.song.beatsPerBar;
+    const base = view || { start: Math.max(0, ((player?.position ?? 0) * state.song.bpm) / 60 - 11), span: 32 };
+    const factor = e.deltaY > 0 ? 1.18 : 0.85;
+    const span = Math.max(4, Math.min(totalBeats, base.span * factor));
+    const centre = base.start + base.span / 2;
+    const start = Math.max(0, Math.min(Math.max(0, totalBeats - span), centre - span / 2));
+    view = { start, span };
+    drawViz(player?.position ?? 0);
+  }, { passive: false });
+
+  els.viz.addEventListener('pointerdown', (e) => {
+    if (vizMode !== 'roll' || !state.song) return;
+    dragging = true;
+    dragStartX = e.clientX;
+    dragStartView = view ? { ...view } : null;
+    els.viz.setPointerCapture?.(e.pointerId);
+  });
+
+  els.viz.addEventListener('pointermove', (e) => {
+    if (!dragging || !dragStartView || !state.song) return;
+    const rect = els.viz.getBoundingClientRect();
+    const beatsPerPx = dragStartView.span / Math.max(1, rect.width);
+    const totalBeats = state.song.bars * state.song.beatsPerBar;
+    const start = Math.max(0, Math.min(Math.max(0, totalBeats - dragStartView.span),
+      dragStartView.start - (e.clientX - dragStartX) * beatsPerPx));
+    view = { start, span: dragStartView.span };
+    drawViz(player?.position ?? 0);
+  });
+
+  els.viz.addEventListener('pointerup', (e) => {
+    if (!dragging) return;
+    dragging = false;
+    const moved = Math.abs(e.clientX - dragStartX);
+    if (moved > 6 || !state.song) return;
+    // a tap scrubs the playhead to that beat
+    const beat = beatAtX(els.viz, state.song, e.clientX, view);
+    const at = (beat * 60) / state.song.bpm;
+    ensurePlayer();
+    if (player.playing) player.play(at);
+    else { player.startPos = at; drawViz(at); }
+  });
+
+  els.viz.addEventListener('dblclick', () => {
+    view = null;
+    drawViz(player?.position ?? 0);
+    toast('Piano roll zoom reset');
+  });
+}
+
 // ------------------------------------------------------------- presets
 function wirePresets() {
   const bind = (el, key) => {
@@ -382,9 +579,11 @@ function wirePresets() {
   bind(els.theme, 'theme');
   bind(els.type, 'type');
   bind(els.tech, 'tech');
+
   els.bpm.addEventListener('input', () => {
-    els.bpmout.textContent = els.bpm.value;
-    setPresets({ bpm: Number(els.bpm.value) });
+    const v = Math.max(BPM_MIN, Math.min(BPM_MAX, Number(els.bpm.value)));
+    els.bpmout.textContent = String(v);
+    setPresets({ bpm: v });
     debouncedGenerate();
   });
   els.bpm.addEventListener('change', () => pushHistory());
@@ -413,6 +612,22 @@ function wirePresets() {
     setPresets({ arp: els.arp.checked });
     debouncedGenerate();
   });
+
+  // track locks: pinning a track freezes its seed
+  const bindTrackLock = (el, name) => {
+    el.addEventListener('change', () => {
+      pushHistory();
+      const lockTracks = { ...(state.presets.lockTracks || {}), [name]: el.checked };
+      const trackSeeds = { ...(state.presets.trackSeeds || {}) };
+      if (el.checked) trackSeeds[name] = state.seed;
+      setPresets({ lockTracks, trackSeeds });
+      generate({ announce: false });
+      toast(el.checked ? `${name} locked` : `${name} unlocked`);
+    });
+  };
+  bindTrackLock(els.lockdrums, 'drums');
+  bindTrackLock(els.locklead, 'lead');
+
   els.volume.addEventListener('input', () => {
     state.ui.volume = Number(els.volume.value) / 100;
     state.ui.muted = false;
@@ -420,6 +635,14 @@ function wirePresets() {
     applyVolume();
     syncControls();
     emit('ui');
+  });
+
+  els.reset.addEventListener('click', () => {
+    pushHistory();
+    state.presets = normalisePresets({ ...DEFAULT_PRESETS });
+    syncControls();
+    generate();
+    toast('Presets reset');
   });
 
   for (const btn of document.querySelectorAll('.lock')) {
@@ -441,6 +664,7 @@ function doRandom() {
   if (!state.locks.bpm) patch.bpm = picks.bpm;
   if (!state.locks.type) patch.type = rng.pick(Object.keys(TYPES));
   pushHistory();
+  state.previous = { presets: snapshot(), seed: state.seed };
   state.seed = randomSeed(12);
   state.presets = normalisePresets({ ...state.presets, ...patch });
   syncControls();
@@ -449,6 +673,7 @@ function doRandom() {
 
 function doEvolve() {
   pushHistory();
+  state.previous = { presets: snapshot(), seed: state.seed };
   state.seed = randomSeed(12);
   syncControls();
   generate();
@@ -462,6 +687,7 @@ function doMutate() {
   const ids = Object.keys(table).filter((id) => id !== state.presets[axis]);
   const next = ids[Math.floor(Math.random() * ids.length)];
   pushHistory();
+  state.previous = { presets: snapshot(), seed: state.seed };
   state.presets = normalisePresets({ ...state.presets, [axis]: next });
   syncControls();
   generate();
@@ -478,8 +704,14 @@ function toggleMute() {
 
 // ------------------------------------------------------------- export
 function stemTracks(song) {
-  return ['drums', 'bass', 'chords', 'lead', 'pad', 'arp']
-    .filter((t) => (song.tracks[t] || []).length > 0);
+  return ['drums', 'bass', 'chords', 'lead', 'pad', 'arp'].filter((t) => (song.tracks[t] || []).length > 0);
+}
+
+function targetLufs() {
+  const v = els.exporttarget?.value ?? 'style';
+  if (v === 'raw') return null;
+  if (v === 'style') return state.song?.lufs ?? -14;
+  return Number(v);
 }
 
 async function exportWav() {
@@ -487,14 +719,18 @@ async function exportWav() {
   toast('Rendering audio…');
   try {
     const buf = await renderSong(state.song, { sampleRate: 44100 });
-    const gain = normalisationGain(buf, state.song.lufs ?? -14, -1);
+    const target = targetLufs();
+    const gain = target == null ? 1 : normalisationGain(buf, target, -1);
     const info = analyseBuffer(buf);
+    lastLufs = info.lufs + 20 * Math.log10(gain || 1);
     const bytes = encodeWav(buf, { bitDepth: 16, gain });
     download(new Blob([bytes], { type: 'audio/wav' }), `${slug(state.song.title)}.wav`);
-    toast(`WAV ready · ${info.lufs.toFixed(1)} LUFS → target ${state.song.lufs}`);
+    toast(target == null
+      ? `WAV ready · ${info.lufs.toFixed(1)} LUFS (unnormalised)`
+      : `WAV ready · ${lastLufs.toFixed(1)} LUFS → target ${target}`);
+    renderSummary();
   } catch (err) {
-    console.error(err);
-    toast('Export failed — see console');
+    fail('WAV export', err);
   }
 }
 
@@ -504,15 +740,17 @@ async function exportStems() {
   const tracks = stemTracks(song);
   if (!tracks.length) { toast('Nothing to stem'); return; }
   try {
-    // one gain for the whole set, measured on the full mix, so the stems sum
-    // back to the mix instead of each being normalised on its own
     toast('Measuring mix…');
     const mix = await renderSong(song, { sampleRate: 44100 });
-    const gain = normalisationGain(mix, song.lufs ?? -14, -1);
+    const target = targetLufs();
+    const gain = target == null ? 1 : normalisationGain(mix, target, -1);
     const files = [];
+    const levels = [];
     for (let i = 0; i < tracks.length; i++) {
       toast(`Rendering stem ${i + 1}/${tracks.length} — ${tracks[i]}`);
       const buf = await renderSong(song, { sampleRate: 44100, only: [tracks[i]] });
+      const info = analyseBuffer(buf);
+      levels.push(`${tracks[i]}: ${(info.lufs + 20 * Math.log10(gain || 1)).toFixed(1)} LUFS`);
       files.push({ name: `${slug(song.title)}-${tracks[i]}.wav`, data: encodeWav(buf, { bitDepth: 16, gain }) });
     }
     files.push({
@@ -520,33 +758,71 @@ async function exportStems() {
       data: new TextEncoder().encode(
         `Stems for "${song.title}"\nSeed: ${song.seed}\nKey: ${song.key.name}\nTempo: ${song.bpm} BPM\n`
         + `Style: ${song.style} · Mood: ${song.mood} · Tech: ${song.tech}\n`
-        + `All stems share one gain (measured on the full mix), so they sum to the exported mix.\n`,
+        + `All stems share one gain (measured on the full mix), so they sum to the exported mix.\n\n`
+        + `Per-stem loudness at that gain:\n${levels.map((l) => `  ${l}`).join('\n')}\n`,
       ),
     });
     const zip = zipStore(files);
     download(new Blob([zip], { type: 'application/zip' }), `${slug(song.title)}-stems.zip`);
     toast(`${tracks.length} stems exported`);
   } catch (err) {
-    console.error(err);
-    toast('Stem export failed — see console');
+    fail('Stem export', err);
   }
 }
 
 function exportMidi() {
   if (!state.song) return;
-  const bytes = songToMidi(state.song);
-  download(new Blob([bytes], { type: 'audio/midi' }), `${slug(state.song.title)}.mid`);
-  toast('MIDI exported');
+  try {
+    const bytes = songToMidi(state.song);
+    download(new Blob([bytes], { type: 'audio/midi' }), `${slug(state.song.title)}.mid`);
+    toast('MIDI exported');
+  } catch (err) { fail('MIDI export', err); }
+}
+
+function exportJson() {
+  if (!state.song) return;
+  const blob = new Blob([JSON.stringify(state.song, null, 2)], { type: 'application/json' });
+  download(blob, `${slug(state.song.title)}.musicgen.json`);
+  toast('Song JSON exported');
+}
+
+function importJson() {
+  els.fileinput.value = '';
+  els.fileinput.click();
+}
+
+async function onFilePicked() {
+  const file = els.fileinput.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const song = JSON.parse(text);
+    if (!song || !song.tracks || !song.presets || !song.seed) throw new Error('not a song file');
+    state.song = song;
+    state.presets = normalisePresets(song.presets);
+    state.seed = song.seed;
+    syncControls();
+    renderMeta();
+    renderSections();
+    renderSummary();
+    drawViz(0);
+    toast(`Imported “${song.title}”`);
+  } catch (err) {
+    fail('Import', err);
+    toast('That file is not a MusicGen song');
+  }
 }
 
 function exportArt() {
   if (!state.song) return;
-  const canvas = document.createElement('canvas');
-  drawArtwork(canvas, state.song, 1024);
-  canvas.toBlob((blob) => {
-    download(blob, `${slug(state.song.title)}-cover.png`);
-    toast('Cover art exported');
-  }, 'image/png');
+  try {
+    const canvas = document.createElement('canvas');
+    drawArtwork(canvas, state.song, 1024);
+    canvas.toBlob((blob) => {
+      download(blob, `${slug(state.song.title)}-cover.png`);
+      toast('Cover art exported');
+    }, 'image/png');
+  } catch (err) { fail('Cover art', err); }
 }
 
 async function doShare() {
@@ -554,7 +830,17 @@ async function doShare() {
   const text = `${state.song?.title ?? 'A song'} — made with MusicGen`;
   try {
     if (navigator.share) {
-      await navigator.share({ title: 'MusicGen', text, url });
+      const payload = { title: 'MusicGen', text, url };
+      if (state.song && navigator.canShare) {
+        const canvas = document.createElement('canvas');
+        drawArtwork(canvas, state.song, 512);
+        const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
+        if (blob) {
+          const file = new File([blob], `${slug(state.song.title)}.png`, { type: 'image/png' });
+          if (navigator.canShare({ files: [file] })) payload.files = [file];
+        }
+      }
+      await navigator.share(payload);
       return;
     }
     await navigator.clipboard.writeText(url);
@@ -571,45 +857,68 @@ async function doSave() {
     await librarySave(state.song);
     toast(`Saved “${state.song.title}”`);
   } catch (err) {
-    console.error(err);
-    toast('Could not save to the library');
+    fail('Save', err);
+    toast('Could not save — storage may be full');
   }
 }
 
 async function openLibrary() {
-  els.libraryList.innerHTML = '';
-  try {
-    const items = await libraryList();
-    if (!items.length) els.libraryList.textContent = 'Nothing saved yet.';
-    for (const it of items) {
-      const row = document.createElement('div');
-      row.className = 'lib-item';
-      const label = document.createElement('div');
-      label.innerHTML = `<strong>${escapeHtml(it.title)}</strong><br><small>${escapeHtml(it.style)} · ${escapeHtml(it.mood)} · ${it.bpm} BPM</small>`;
-      const load = document.createElement('button');
-      load.textContent = 'Load';
-      load.addEventListener('click', () => {
-        pushHistory();
-        state.presets = normalisePresets({ ...state.presets, ...it.presets });
-        state.seed = it.seed;
-        syncControls();
-        generate();
-        els.library.close();
-      });
-      const del = document.createElement('button');
-      del.textContent = '✕';
-      del.setAttribute('aria-label', `Delete ${it.title}`);
-      del.addEventListener('click', async () => {
-        await libraryDelete(it.id);
-        row.remove();
-      });
-      row.append(label, load, del);
-      els.libraryList.appendChild(row);
+  const render = async (query = '') => {
+    els.libraryList.innerHTML = '';
+    try {
+      const items = await libraryList();
+      const q = query.trim().toLowerCase();
+      const filtered = q
+        ? items.filter((it) => `${it.title} ${it.style} ${it.mood} ${(it.tags || []).join(' ')}`.toLowerCase().includes(q))
+        : items;
+      if (!filtered.length) els.libraryList.textContent = items.length ? 'No matches.' : 'Nothing saved yet.';
+      for (const it of filtered) {
+        const row = document.createElement('div');
+        row.className = 'lib-item';
+        const label = document.createElement('div');
+        label.innerHTML = `<strong>${escapeHtml(it.title)}</strong><br><small>${escapeHtml(it.style)} · ${escapeHtml(it.mood)} · ${it.bpm} BPM</small>`;
+        const load = document.createElement('button');
+        load.textContent = 'Load';
+        load.addEventListener('click', () => {
+          pushHistory();
+          state.previous = { presets: snapshot(), seed: state.seed };
+          state.presets = normalisePresets({ ...state.presets, ...it.presets });
+          state.seed = it.seed;
+          syncControls();
+          generate();
+          els.library.close();
+        });
+        const rename = document.createElement('button');
+        rename.textContent = 'Rename';
+        rename.addEventListener('click', async () => {
+          const name = prompt('New title', it.title);
+          if (!name) return;
+          await libraryRename(it.id, name);
+          render(els.searchlib.value);
+        });
+        const dup = document.createElement('button');
+        dup.textContent = 'Copy';
+        dup.addEventListener('click', async () => {
+          await libraryDuplicate(it.id);
+          render(els.searchlib.value);
+        });
+        const del = document.createElement('button');
+        del.textContent = '✕';
+        del.setAttribute('aria-label', `Delete ${it.title}`);
+        del.addEventListener('click', async () => {
+          await libraryDelete(it.id);
+          row.remove();
+        });
+        row.append(label, load, rename, dup, del);
+        els.libraryList.appendChild(row);
+      }
+    } catch (err) {
+      fail('Library', err);
+      els.libraryList.textContent = 'Library unavailable.';
     }
-  } catch (err) {
-    console.error(err);
-    els.libraryList.textContent = 'Library unavailable.';
-  }
+  };
+  els.searchlib.oninput = () => render(els.searchlib.value);
+  await render('');
   els.library.showModal();
 }
 
@@ -629,6 +938,8 @@ function wireActions() {
   els.random.addEventListener('click', doRandom);
   els.evolve.addEventListener('click', doEvolve);
   els.mutate.addEventListener('click', doMutate);
+  els.ab.addEventListener('click', toggleAB);
+  els.loop.addEventListener('click', toggleLoop);
 
   els.menu.addEventListener('click', () => {
     const open = els.sheet.hidden;
@@ -643,11 +954,14 @@ function wireActions() {
     if (act === 'wav') exportWav();
     if (act === 'stems') exportStems();
     if (act === 'midi') exportMidi();
+    if (act === 'json') exportJson();
+    if (act === 'import') importJson();
     if (act === 'art') exportArt();
     if (act === 'share') doShare();
     if (act === 'undo') undo();
     if (act === 'redo') redo();
     if (act === 'library') openLibrary();
+    if (act === 'install') doInstall();
     if (act === 'help') els.help.showModal();
   });
 
@@ -658,6 +972,7 @@ function wireActions() {
   $('share').addEventListener('click', doShare);
   $('save').addEventListener('click', doSave);
   els.seed.addEventListener('click', doShare);
+  els.fileinput.addEventListener('change', onFilePicked);
 
   document.addEventListener('keydown', (e) => {
     if (e.target.matches('input, select, textarea, dialog')) return;
@@ -673,6 +988,7 @@ function wireActions() {
     else if (k === 'r') doRandom();
     else if (k === 'e') doEvolve();
     else if (k === 'm') doMutate();
+    else if (k === 'b') toggleAB();
     else if (k === 'u') toggleMute();
     else if (k === 't') cycleTheme();
     else if (k === 'v') setVizMode(VIZ_MODES[(VIZ_MODES.indexOf(vizMode) + 1) % VIZ_MODES.length]);
@@ -681,6 +997,10 @@ function wireActions() {
     else if (k === 'l') {
       const focused = document.activeElement?.dataset?.lock;
       if (focused) toggleLock(focused);
+    } else if (k === '+' || k === '=') {
+      zoomRoll(0.85);
+    } else if (k === '-' || k === '_') {
+      zoomRoll(1.18);
     } else if ('123456'.includes(k)) {
       const map = { 1: els.style, 2: els.mood, 3: els.theme, 4: els.bpm, 5: els.type, 6: els.tech };
       map[k]?.focus();
@@ -698,6 +1018,16 @@ function wireActions() {
   });
 }
 
+function zoomRoll(factor) {
+  if (!state.song) return;
+  const totalBeats = state.song.bars * state.song.beatsPerBar;
+  const base = view || { start: Math.max(0, ((player?.position ?? 0) * state.song.bpm) / 60 - 11), span: 32 };
+  const span = Math.max(4, Math.min(totalBeats, base.span * factor));
+  const centre = base.start + base.span / 2;
+  view = { start: Math.max(0, Math.min(Math.max(0, totalBeats - span), centre - span / 2)), span };
+  drawViz(player?.position ?? 0);
+}
+
 // ------------------------------------------------------------- boot
 async function boot() {
   loadState();
@@ -706,6 +1036,8 @@ async function boot() {
   syncControls();
   wirePresets();
   wireActions();
+  wireRoll();
+  wireInstall();
   subscribe(() => syncControls());
 
   const hash = location.hash.match(/^#s=(.+)$/);
@@ -722,6 +1054,19 @@ async function boot() {
   generate();
   if (vizMode === 'art') setIdleAnimation();
 
+  // restore the last playback position (not playing — browsers want a gesture)
+  if (state.ui.position > 1 && state.ui.position < (state.song?.durationSec ?? 0) - 2) {
+    ensurePlayer();
+    player.startPos = state.ui.position;
+    drawViz(state.ui.position);
+  }
+  setInterval(() => {
+    if (player && !player.playing && player.startPos > 0) {
+      state.ui.position = player.startPos;
+      persist();
+    }
+  }, 5000);
+
   const params = new URLSearchParams(location.search);
   if (params.get('action') === 'random') doRandom();
   if (params.get('action') === 'play') setTimeout(() => play(), 300);
@@ -729,9 +1074,11 @@ async function boot() {
   if ('serviceWorker' in navigator) {
     try {
       await navigator.serviceWorker.register('sw.js');
-      if (!navigator.serviceWorker.controller) {
-        navigator.serviceWorker.addEventListener('controllerchange', () => toast('Offline ready'));
-      }
+      if (navigator.serviceWorker.controller) markOfflineReady();
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        markOfflineReady();
+        toast('Updated — reload for the new version');
+      });
     } catch { /* offline install is a bonus */ }
   }
 }

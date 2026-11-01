@@ -257,6 +257,38 @@ h1 em::after {
   border-bottom: 1px solid rgba(154, 168, 255, 0.4);
 }
 .spec-link:hover { color: var(--paper); }
+.seeds {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.seeds-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-right: 2px;
+}
+.seeds button {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.seeds button:hover { color: var(--paper); border-color: rgba(198, 242, 78, 0.5); }
+.seeds button[aria-pressed="true"] {
+  color: var(--ink);
+  background: var(--lime);
+  border-color: var(--lime);
+}
+
 .specimen-note {
   margin: 10px 2px 0;
   font-size: 12px;

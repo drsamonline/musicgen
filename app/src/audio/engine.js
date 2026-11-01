@@ -1,5 +1,5 @@
 // Audio engine: graph builder, scheduler, live player, offline renderer.
-import { synthVoice } from './instruments.js';
+import { synthVoice, isOffline } from './instruments.js';
 import { drumVoice } from './drums.js';
 import { createFxBuses } from './fx.js';
 import { createMasterChain } from './mastering.js';
@@ -14,15 +14,43 @@ const TRACK_SEND = { drums: 0.12, bass: 0.04, chords: 0.32, lead: 0.4, pad: 0.6,
 export function voiceCap() {
   const cores = globalThis.navigator?.hardwareConcurrency || 4;
   const mem = globalThis.navigator?.deviceMemory || 4;
-  if (cores <= 4 || mem <= 2) return 24;
-  return 48;
+  if (cores <= 4 || mem <= 2) return 32;
+  if (cores <= 8) return 64;
+  return 96;
 }
 
+// ---------------------------------------------------------------- graph
 export function buildGraph(ctx, song) {
   const master = ctx.createGain();
   master.gain.value = 0.55;
+
   const chain = createMasterChain(ctx, song);
-  master.connect(chain.input);
+
+  // mono bass: everything below ~120 Hz is summed to mono before the master
+  // chain, which is what stops a wide mix from falling apart on a phone
+  if (song.monoBass) {
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 120;
+    lp.Q.value = 0.7;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 120;
+    hp.Q.value = 0.7;
+    const mono = ctx.createGain();
+    try {
+      mono.channelCount = 1;
+      mono.channelCountMode = 'explicit';
+      mono.channelInterpretation = 'speakers';
+    } catch { /* old browsers: leave it stereo */ }
+    master.connect(lp);
+    lp.connect(mono);
+    mono.connect(chain.input);
+    master.connect(hp);
+    hp.connect(chain.input);
+  } else {
+    master.connect(chain.input);
+  }
   chain.output.connect(ctx.destination);
 
   let analyser = null;
@@ -34,6 +62,11 @@ export function buildGraph(ctx, song) {
   }
 
   const fx = createFxBuses(ctx, song, master);
+
+  // sidechain bus: chords, pads and arp duck under the kick
+  const sidechain = ctx.createGain();
+  sidechain.gain.value = 1;
+  sidechain.connect(master);
 
   const tech = TECHS[song.tech] || TECHS.analog;
   const tracks = {};
@@ -50,7 +83,25 @@ export function buildGraph(ctx, song) {
       input.connect(panner);
       node = panner;
     }
-    node.connect(master);
+
+    const duckable = song.sidechain && (name === 'chords' || name === 'pad' || name === 'arp');
+    node.connect(duckable ? sidechain : master);
+
+    // width: a short, opposite-panned delayed tap — cheap stereo
+    if ((name === 'pad' || name === 'chords') && song.width > 0 && typeof ctx.createDelay === 'function') {
+      const tap = ctx.createDelay(0.05);
+      tap.delayTime.value = 0.011 + (name === 'pad' ? 0.006 : 0);
+      const tapGain = ctx.createGain();
+      tapGain.gain.value = 0.28 * Math.min(1, song.width);
+      node.connect(tap).connect(tapGain);
+      if (typeof ctx.createStereoPanner === 'function') {
+        const tapPan = ctx.createStereoPanner();
+        tapPan.pan.value = (TRACK_PAN[name] ?? 0) + (name === 'pad' ? 0.7 : -0.7);
+        tapGain.connect(tapPan).connect(duckable ? sidechain : master);
+      } else {
+        tapGain.connect(master);
+      }
+    }
 
     // per-track FX sends
     const sendRev = ctx.createGain();
@@ -71,29 +122,26 @@ export function buildGraph(ctx, song) {
   }
 
   return {
-    ctx, master, chain, fx, tracks, tech, analyser,
-    cap: { max: voiceCap(), active: 0 },
+    ctx, master, chain, fx, tracks, tech, analyser, sidechain,
+    cap: { max: isOffline(ctx) ? 64 : voiceCap(), active: [], stolen: 0, dropped: 0 },
     song,
   };
 }
 
-// ------------------------------------------------------------- scheduling
+// ---------------------------------------------------------------- scheduling
 export function buildEvents(song, only = null) {
   const spb = 60 / (song.bpm || 100);
   const events = [];
   const list = only ? TRACK_NAMES.filter((t) => only.includes(t)) : TRACK_NAMES;
   for (const track of list) {
-    const notes = song.tracks[track] || [];
-    for (const n of notes) {
-      events.push({ sec: n.t * spb, track, n });
-    }
+    for (const n of song.tracks[track] || []) events.push({ sec: n.t * spb, track, n });
   }
   events.sort((a, b) => a.sec - b.sec || a.track.localeCompare(b.track));
   return events;
 }
 
 // Sections are contiguous, so a binary search over precomputed start beats
-// beats scanning the list for every note (there are thousands of notes).
+// beats scanning the list for every note.
 function sectionIntensity(song) {
   const spans = song.sections.map((s) => ({
     start: s.bar * song.beatsPerBar,
@@ -112,38 +160,80 @@ function sectionIntensity(song) {
   };
 }
 
+function pruneVoices(cap, now) {
+  const a = cap.active;
+  if (!a.length) return;
+  let w = 0;
+  for (let i = 0; i < a.length; i++) if (a[i].end > now) a[w++] = a[i];
+  a.length = w;
+}
+
+function stealQuietest(cap, now, at = now) {
+  const a = cap.active;
+  let idx = 0;
+  let best = Infinity;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].vel < best) { best = a[i].vel; idx = i; }
+  }
+  const victim = a[idx];
+  if (victim?.out?.gain) {
+    try {
+      victim.out.gain.cancelScheduledValues(at);
+      victim.out.gain.setTargetAtTime(0.0001, at, 0.01);
+    } catch { /* noop */ }
+  }
+  a.splice(idx, 1);
+  cap.stolen++;
+}
+
 export function makeScheduler(graph, song) {
   const spb = 60 / (song.bpm || 100);
   const intensityAt = sectionIntensity(song);
   const tech = graph.tech;
+  const offline = isOffline(graph.ctx);
 
   return function scheduleEvent(ev, when) {
     const { track, n } = ev;
     const brightness = 0.55 + intensityAt(n.t) * 0.7;
+
     if (track === 'drums') {
       drumVoice(graph.ctx, graph.tracks.drums.input, {
         when, kind: n.drum, vel: n.v, engine: tech.drums?.engine || 'analog',
       });
+      if (n.drum === 'kick' && song.sidechain) {
+        const g = graph.sidechain.gain;
+        try {
+          g.setValueAtTime(1, when);
+          g.linearRampToValueAtTime(0.55, when + 0.008);
+          g.linearRampToValueAtTime(1, when + Math.min(0.3, 0.16 + 30 / (song.bpm || 100)));
+        } catch { /* noop */ }
+      }
       return;
     }
+
     const spec = tech.instruments[track] || tech.instruments.chords;
-    if (graph.cap.active >= graph.cap.max) {
-      // voice stealing: only quiet notes are dropped
-      if (n.v > 0.72) { /* let it through */ } else return;
-    }
-    synthVoice(graph.ctx, graph.tracks[track].input, {
+
+    // Voice pool: prune what has finished, then steal the quietest voice
+    // rather than silently dropping the new note. Dropping is what made
+    // dense passages lose their melody. In an offline render "now" is the
+    // event's own time — the whole song is scheduled in one pass.
+    const now = offline ? when : graph.ctx.currentTime;
+    pruneVoices(graph.cap, now);
+    if (graph.cap.active.length >= graph.cap.max) stealQuietest(graph.cap, now, when);
+
+    const voice = synthVoice(graph.ctx, graph.tracks[track].input, {
       when,
       dur: Math.max(0.03, n.d * spb),
       freq: freqOf(n.p),
       vel: n.v,
       spec,
       brightness,
-      cap: graph.cap,
     });
+    if (voice) graph.cap.active.push({ end: voice.end, out: voice.out, vel: n.v });
   };
 }
 
-// ------------------------------------------------------------- live player
+// ---------------------------------------------------------------- live player
 export class Player {
   constructor(song) {
     this.song = song;
@@ -157,8 +247,10 @@ export class Player {
     this.playing = false;
     this.onEnd = null;
     this.onTick = null;
-    this.lookahead = 0.12;
+    this.lookahead = 0.2;
     this.intervalMs = 25;
+    this.loop = null;
+    this.userVolume = 0.9;
   }
 
   async init() {
@@ -172,8 +264,7 @@ export class Player {
   get duration() { return this.song.durationSec; }
 
   get position() {
-    if (!this.ctx) return this.startPos;
-    if (!this.playing) return this.startPos;
+    if (!this.ctx || !this.playing) return this.startPos;
     return Math.min(this.duration, this.ctx.currentTime - this.startCtxTime + this.startPos);
   }
 
@@ -192,22 +283,39 @@ export class Player {
     this.tick();
   }
 
+  setLoop(startSec, endSec) {
+    this.loop = startSec == null ? null : { start: startSec, end: endSec };
+  }
+
   tick() {
     if (!this.playing) return;
-    const now = this.ctx.currentTime - this.startCtxTime; // song-time at ctx "now"
+    const now = this.ctx.currentTime - this.startCtxTime; // song time at "now"
     const horizon = now + this.lookahead;
+
     while (this.idx < this.events.length && this.events[this.idx].sec < horizon) {
       const ev = this.events[this.idx++];
       const when = this.startCtxTime + (ev.sec - this.startPos);
-      if (when < this.ctx.currentTime - 0.05) continue;
+      // a note more than 60 ms late is skipped rather than fired in a burst
+      if (when < this.ctx.currentTime - 0.06) continue;
       try {
-        this.schedule(ev, Math.max(when, this.ctx.currentTime + 0.005));
+        this.schedule(ev, Math.max(when, this.ctx.currentTime + 0.004));
       } catch (err) {
-        // a single failed voice must never stop playback
+        this.graph.cap.dropped++;
         if (globalThis.console) console.warn('voice failed', err);
       }
     }
+
     if (this.onTick) this.onTick(this.position);
+
+    if (this.loop && now >= this.loop.end) {
+      const from = this.loop.start;
+      this.startPos = from;
+      this.startCtxTime = this.ctx.currentTime + 0.02;
+      this.idx = this.events.findIndex((e) => e.sec >= from);
+      if (this.idx < 0) this.idx = this.events.length;
+      return;
+    }
+
     if (now >= this.duration) {
       this.playing = false;
       this.stopTimerOnly();
@@ -241,7 +349,7 @@ export class Player {
     if (!this.graph || !this.ctx) return;
     const g = this.graph.master.gain;
     const now = this.ctx.currentTime;
-    const target = silent ? 0 : (this.userVolume ?? 0.9) * 0.55;
+    const target = silent ? 0.0001 : this.userVolume * 0.55;
     try {
       g.cancelScheduledValues(now);
       g.setTargetAtTime(target, now, 0.015);
@@ -264,7 +372,7 @@ export class Player {
   }
 }
 
-// ------------------------------------------------------------- offline
+// ---------------------------------------------------------------- offline
 export async function renderSong(song, { sampleRate = 44100, tailSec = 2, onProgress = null, only = null } = {}) {
   const lengthSec = song.durationSec + tailSec;
   const frames = Math.ceil(lengthSec * sampleRate);
@@ -274,7 +382,7 @@ export async function renderSong(song, { sampleRate = 44100, tailSec = 2, onProg
   const graph = buildGraph(ctx, song);
   const schedule = makeScheduler(graph, song);
   for (const ev of buildEvents(song, only)) {
-    try { schedule(ev, Math.max(0, ev.sec)); } catch { /* skip a bad voice */ }
+    try { schedule(ev, Math.max(0, ev.sec)); } catch { graph.cap.dropped++; }
   }
   if (onProgress) onProgress(0.5);
   const buf = await ctx.startRendering();

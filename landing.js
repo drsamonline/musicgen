@@ -18,6 +18,14 @@ const PRESETS = {
   bpm: 84, type: 'loop', timeSig: [4, 4], arp: false, chaos: 0.15,
 };
 
+// three fixed seeds, so the page can play the same song twice
+const FIXED_SEEDS = ['neon-rain-84', 'mainstage-128', 'dash-glow-132'];
+const SEED_PRESETS = [
+  { ...PRESETS },
+  { ...PRESETS, style: 'edm', mood: 'epic', theme: 'festival', bpm: 128, tech: 'wavetable' },
+  { ...PRESETS, style: 'jazz', mood: 'playful', theme: 'nightdrive', bpm: 132, tech: 'physical' },
+];
+
 const COLORS = { lead: '#c6f24e', chords: '#9aa8ff', bass: '#ff9f6b', pad: '#6ee7c8', arp: '#ffd166' };
 
 let song = null;
@@ -122,6 +130,47 @@ function regenerate() {
   song = compose(PRESETS, randomSeed(12));
   setMeta();
   draw(0);
+  markSeed(-1);
+}
+
+function markSeed(index) {
+  const buttons = document.querySelectorAll('#seeds button');
+  buttons.forEach((b, i) => b.setAttribute('aria-pressed', String(i === index)));
+}
+
+async function playFixed(index) {
+  if (playing) {
+    player.pause();
+    playing = false;
+    playBtn.textContent = '▶ Play';
+    stopRaf();
+  }
+  song = compose(SEED_PRESETS[index], FIXED_SEEDS[index]);
+  if (!player) player = new Player(song);
+  else {
+    // a new song needs a new graph
+    await player.close();
+    player = new Player(song);
+  }
+  setMeta();
+  draw(0);
+  markSeed(index);
+  await togglePlay();
+  noteEl.textContent = `Fixed seed “${FIXED_SEEDS[index]}” — the same notes every time you press it.`;
+}
+
+function buildSeeds() {
+  const host = document.getElementById('seeds');
+  if (!host) return;
+  FIXED_SEEDS.forEach((seed, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = `${SEED_PRESETS[i].style} · ${SEED_PRESETS[i].bpm}`;
+    b.setAttribute('aria-pressed', 'false');
+    b.title = `Play the fixed seed ${seed}`;
+    b.addEventListener('click', () => playFixed(i));
+    host.appendChild(b);
+  });
 }
 
 async function togglePlay() {
@@ -183,10 +232,12 @@ nextBtn.addEventListener('click', () => {
     playBtn.textContent = '▶ Play';
     stopRaf();
   }
-  regenerate();
+  buildSeeds();
+regenerate();
 });
 window.addEventListener('resize', () => draw(playing ? player.position : 0));
 
+buildSeeds();
 regenerate();
 
 // pause the specimen if the visitor scrolls away or hides the tab

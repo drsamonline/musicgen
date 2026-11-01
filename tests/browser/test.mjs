@@ -22,6 +22,7 @@ async function loadPuppeteer() {
 function launchOptions(extra = []) {
   const opts = {
     headless: true,
+    protocolTimeout: 600000,
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--autoplay-policy=no-user-gesture-required', ...extra],
   };
   if (process.env.CHROME_PATH) opts.executablePath = process.env.CHROME_PATH;
@@ -153,13 +154,17 @@ try {
     await p.play();
     await new Promise((r) => setTimeout(r, 900));
     const pos = p.position;
-    const active = p.graph.cap.active;
+    const active = p.graph.cap.active.length;
+    const dropped = p.graph.cap.dropped;
+    const stolen = p.graph.cap.stolen;
     p.stop();
     await p.close();
-    return { pos, active, state: 'ok' };
+    return { pos, active, dropped, stolen };
   });
   check('playhead advances', live.pos > 0.2, `position ${live.pos.toFixed(2)} s`);
   check('voices were created', live.active > 0, `${live.active} active voices`);
+  check('no voices dropped', live.dropped === 0, `${live.dropped} dropped`);
+  check('few voices stolen', live.stolen < 40, `${live.stolen} stolen`);
 
   console.log('\nExport path');
   const exported = await page.evaluate(async () => {
@@ -192,6 +197,131 @@ try {
   });
   check('service worker registered', sw.registered);
   check('app shell cached', sw.caches.length > 0, sw.caches.join(','));
+
+  console.log('\nTempo extremes (20–500 BPM)');
+  const tempo = await page.evaluate(async () => {
+    const { compose, normalisePresets, BPM_MIN, BPM_MAX } = await import('./src/core/composer.js');
+    const { renderSong } = await import('./src/audio/engine.js');
+    const out = { min: BPM_MIN, max: BPM_MAX, clamped: [normalisePresets({ bpm: 5 }).bpm, normalisePresets({ bpm: 900 }).bpm] };
+    for (const bpm of [20, 500]) {
+      const song = compose({ style: 'lofi', mood: 'calm', theme: 'rain', tech: 'analog', bpm, type: 'loop' }, `tempo-${bpm}`);
+      const buf = await renderSong(song, { sampleRate: 22050, tailSec: 0.2 });
+      const d = buf.getChannelData(0);
+      let sum = 0;
+      for (let i = 0; i < d.length; i++) sum += d[i] * d[i];
+      out[bpm] = {
+        rms: Math.sqrt(sum / d.length),
+        seconds: +(buf.length / buf.sampleRate).toFixed(2),
+        notes: song.totalNotes,
+        duration: +song.durationSec.toFixed(2),
+      };
+    }
+    return out;
+  });
+  check('tempo floor is 20 BPM', tempo.min === 20, String(tempo.min));
+  check('tempo ceiling is 500 BPM', tempo.max === 500, String(tempo.max));
+  check('tempo is clamped at both ends', tempo.clamped[0] === 20 && tempo.clamped[1] === 500, tempo.clamped.join('/'));
+  check('20 BPM renders audio', tempo[20].rms > 0.002, `rms ${tempo[20].rms.toFixed(4)}`);
+  check('500 BPM renders audio', tempo[500].rms > 0.002, `rms ${tempo[500].rms.toFixed(4)}`);
+  check('500 BPM is faster than 20 BPM', tempo[500].duration < tempo[20].duration, `${tempo[500].duration}s vs ${tempo[20].duration}s`);
+
+  console.log('\nVoice pool + render integrity');
+  const integrity = await page.evaluate(async () => {
+    const { compose } = await import('./src/core/composer.js');
+    const { renderSong, buildEvents } = await import('./src/audio/engine.js');
+    const song = compose({ style: 'edm', mood: 'epic', theme: 'festival', tech: 'analog', bpm: 128, type: 'loop' }, 'integrity');
+    const events = buildEvents(song).length;
+    const buf = await renderSong(song, { sampleRate: 22050, tailSec: 0.3 });
+    const d = buf.getChannelData(0), sr = buf.sampleRate;
+    // count silent half-second windows: a dropped-voice render has holes
+    const win = Math.floor(sr * 0.5);
+    let silent = 0, windows = 0;
+    for (let i = 0; i + win <= d.length; i += win) {
+      let s = 0;
+      for (let j = 0; j < win; j++) s += d[i + j] * d[i + j];
+      if (Math.sqrt(s / win) < 0.0008) silent++;
+      windows++;
+    }
+    return { events, silent, windows, seconds: +(buf.length / sr).toFixed(1) };
+  });
+  check('dense render has no silent holes', integrity.silent <= 1, `${integrity.silent}/${integrity.windows} silent windows over ${integrity.seconds}s`);
+
+  console.log('\nLoudness regression');
+  const loud = await page.evaluate(async () => {
+    const { compose } = await import('./src/core/composer.js');
+    const { renderSong } = await import('./src/audio/engine.js');
+    const { analyseBuffer } = await import('./src/export/wav.js');
+    const rows = [];
+    for (const [style, mood, bpm] of [['lofi', 'calm', 84], ['edm', 'epic', 128], ['ambient', 'calm', 60]]) {
+      const song = compose({ style, mood, theme: 'rain', tech: 'analog', bpm, type: 'loop' }, `loud-${style}`);
+      const buf = await renderSong(song, { sampleRate: 22050, tailSec: 0.3 });
+      const info = analyseBuffer(buf);
+      rows.push({ style, target: song.lufs, lufs: +info.lufs.toFixed(1), peak: +info.peakDb.toFixed(2) });
+    }
+    return rows;
+  });
+  for (const row of loud) {
+    check(`${row.style} loudness near its target`, Math.abs(row.lufs - row.target) < 6,
+      `${row.lufs} LUFS vs ${row.target}`);
+    check(`${row.style} does not clip`, row.peak < 0, `${row.peak} dBTP`);
+  }
+
+  console.log('\nStress: 7/8 at 500 BPM');
+  const stress = await page.evaluate(async () => {
+    const { compose } = await import('./src/core/composer.js');
+    const { Player } = await import('./src/audio/engine.js');
+    const song = compose({ style: 'edm', mood: 'epic', theme: 'festival', tech: 'analog', bpm: 500, type: 'full', timeSig: [7, 8] }, 'stress');
+    const p = new Player(song);
+    await p.init();
+    if (p.ctx.state === 'suspended') await p.ctx.resume();
+    await p.play();
+    await new Promise((r) => setTimeout(r, 1600));
+    const res = {
+      pos: p.position,
+      dropped: p.graph.cap.dropped,
+      stolen: p.graph.cap.stolen,
+      active: p.graph.cap.active.length,
+      cap: p.graph.cap.max,
+      notes: song.totalNotes,
+    };
+    p.stop();
+    await p.close();
+    return res;
+  });
+  check('500 BPM 7/8 plays without exceptions', stress.dropped === 0, `${stress.dropped} dropped`);
+  check('voice pool stays inside its cap', stress.active <= stress.cap, `${stress.active}/${stress.cap}`);
+  check('playhead moves at 500 BPM', stress.pos > 0.3, `${stress.pos.toFixed(2)} s`);
+
+  console.log('\nComposer features');
+  const features = await page.evaluate(async () => {
+    const { compose } = await import('./src/core/composer.js');
+    const base = { style: 'rock', mood: 'epic', theme: 'desert', tech: 'analog', bpm: 120, type: 'full' };
+    const a = compose({ ...base, lockTracks: { drums: true }, trackSeeds: { drums: 'fixed' } }, 'seedA');
+    const b = compose({ ...base, lockTracks: { drums: true }, trackSeeds: { drums: 'fixed' } }, 'seedB');
+    const sameDrums = JSON.stringify(a.tracks.drums) === JSON.stringify(b.tracks.drums);
+    const diffLead = JSON.stringify(a.tracks.lead) !== JSON.stringify(b.tracks.lead);
+
+    const mod = compose({ style: 'cinematic', mood: 'epic', theme: 'space', tech: 'additive', bpm: 70, type: 'full' }, 'mod-test');
+    const keys = mod.sections.map((s) => s.key.tonic);
+    const aliased = compose({ style: 'lofi', mood: 'calm', theme: 'rain', tech: 'analog', bpm: 80, type: 'aba' }, 'alias');
+    const [A1, , A2] = aliased.sections;
+    const aliasSame = JSON.stringify(A1.chords.map((c) => c.symbol)) === JSON.stringify(A2.chords.map((c) => c.symbol));
+
+    const rhythm = compose({ style: 'rock', mood: 'happy', theme: 'festival', tech: 'analog', bpm: 140, type: 'loop' }, 'rhythm');
+    const perBar = {};
+    for (const n of rhythm.tracks.chords) {
+      const bar = Math.floor(n.t / rhythm.beatsPerBar);
+      perBar[bar] = (perBar[bar] || 0) + 1;
+    }
+    const varied = new Set(Object.values(perBar)).size > 1;
+
+    return { sameDrums, diffLead, keys, aliasSame, varied, chordCount: rhythm.tracks.chords.length };
+  });
+  check('locked drums survive a new seed', features.sameDrums);
+  check('unlocked melody follows the seed', features.diffLead);
+  check('sections can modulate key', new Set(features.keys).size > 1, features.keys.join(','));
+  check('A-B-A reuses section A material', features.aliasSame);
+  check('chord rhythm varies between bars', features.varied, `${features.chordCount} chord notes`);
 
   console.log('\nThemes');
   const themeStart = await page.evaluate(() => document.documentElement.dataset.theme);
@@ -296,6 +426,21 @@ try {
   check('specimen canvas drawn', landing.opaque > 0, `${landing.opaque} pixels`);
   check('specimen links into the studio with its seed', landing.link.startsWith('app/#s='), landing.link);
   check('no landing console errors', landingErrors.length === 0, landingErrors.slice(0, 2).join(' | '));
+
+  const seeds = await page.evaluate(async () => {
+    const buttons = [...document.querySelectorAll('#seeds button')];
+    if (!buttons.length) return { count: 0 };
+    buttons[1].click();
+    await new Promise((r) => setTimeout(r, 900));
+    return {
+      count: buttons.length,
+      pressed: document.querySelectorAll('#seeds button[aria-pressed="true"]').length,
+      meta: document.getElementById('spec-meta').textContent,
+    };
+  });
+  check('landing has fixed-seed buttons', seeds.count === 3, String(seeds.count));
+  check('a fixed seed plays and is marked', seeds.pressed === 1, `${seeds.pressed} pressed`);
+  check('fixed seed updates the specimen', /128 BPM/.test(seeds.meta || ''), seeds.meta);
 
   console.log('\nInteractions');
   await page.goto(`${base}app/`, { waitUntil: 'networkidle0' });

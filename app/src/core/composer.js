@@ -8,7 +8,7 @@ import {
 } from './theory.js';
 import { voiceProgression } from './voicing.js';
 import { applyTransform } from './motif.js';
-import { STYLES } from '../presets/styles.js';
+import { STYLES, STYLE_EXTRAS } from '../presets/styles.js';
 import { MOODS } from '../presets/moods.js';
 import { THEMES } from '../presets/themes.js';
 import { TYPES, SECTION_TRACKS, SECTION_INTENSITY, TYPE_TRACK_MASK } from '../presets/types.js';
@@ -18,6 +18,9 @@ const TONIC_WEIGHTS = [
   // C  C# D  D# E  F  F# G  G# A  A# B
   3, 1, 3, 1, 3, 3, 1, 3, 1, 3, 2, 2,
 ];
+
+export const BPM_MIN = 20;
+export const BPM_MAX = 500;
 
 export const DEFAULT_PRESETS = {
   style: 'lofi', mood: 'dreamy', theme: 'rain', tech: 'analog',
@@ -33,7 +36,7 @@ export function normalisePresets(p) {
   if (!THEMES[out.theme]) out.theme = 'rain';
   if (!TECHS[out.tech]) out.tech = 'analog';
   if (!TYPES[out.type]) out.type = 'full';
-  out.bpm = Math.max(40, Math.min(200, Math.round(Number(out.bpm) || 84)));
+  out.bpm = Math.max(BPM_MIN, Math.min(BPM_MAX, Math.round(Number(out.bpm) || 84)));
   const ts = Array.isArray(out.timeSig) ? out.timeSig : [4, 4];
   out.timeSig = [Math.max(1, Math.min(12, ts[0] | 0)), ts[1] | 0 || 4];
   return out;
@@ -143,6 +146,12 @@ function drumBar(rng, style, intensity, bar, barInSection, sectionBars, steps, c
 
   for (const kind of kinds) {
     let grid = resampleGrid(groove[kind], steps);
+    // phrase mutation: every other 4-bar phrase nudges the pattern so a
+    // section does not repeat a bar eight times
+    if (barInSection >= 4 && barInSection % 4 < 2 && kind !== 'kick' && rng.chance(0.5)) {
+      const shift = rng.chance(0.5) ? 1 : -1;
+      grid = grid.map((v, i) => grid[(i + shift + steps) % steps]);
+    }
     const baseVel = kind === 'kick' ? 1 : kind === 'snare' || kind === 'clap' ? 0.85 : 0.55;
     if (kind === 'hat') {
       // euclidean hat layer for non-4/4 and low-intensity sections
@@ -282,6 +291,19 @@ function makeMotif(rng, ctx, chord, density) {
     out.push({ t: i * 0.5, d: dur, p, v: (strong ? 0.85 : 0.62) * (0.7 + (mood.velCurve ?? 0.6) * 0.4) });
     lastPitch = p;
   }
+  // contour memory: the phrase resolves to a chord tone instead of wandering
+  if (out.length) {
+    const last = out[out.length - 1];
+    let best = last.p, bd = 99;
+    for (const c of chordTones) {
+      for (let k = -2; k <= 2; k++) {
+        const cand = last.p - (last.p % 12) + c + 12 * k;
+        const d = Math.abs(cand - last.p);
+        if (d < bd) { bd = d; best = cand; }
+      }
+    }
+    if (bd <= 3) last.p = best;
+  }
   return out;
 }
 function degIndex(midi, tonicPc, scale) {
@@ -362,14 +384,28 @@ function leadSection(rng, style, ctx, section, chords) {
 }
 
 // ------------------------------------------------------------- pad / arp
-function padSection(rng, ctx, section, chords) {
+// Counter-line: the pad answers in the gaps where the lead is silent.
+function padSection(rng, ctx, section, chords, leadNotes = []) {
   const out = [];
+  const beatOf = (n) => n.t;
+  const busy = (start, end) => leadNotes.some((n) => beatOf(n) < end && beatOf(n) + n.d > start);
+
   for (let bar = 0; bar < section.bars; bar++) {
     const ch = chords[bar % chords.length];
     const notes = (ch.voicing || []).slice(1).map((p) => p + 12);
     const start = ctx.barStart + bar * ctx.beatsPerBar;
-    for (const p of notes) {
-      out.push({ t: start, d: ctx.beatsPerBar * 0.99, p, v: 0.35 + section.intensity * 0.2 });
+    const end = start + ctx.beatsPerBar;
+
+    if (leadNotes.length && busy(start, end) && rng.chance(0.55)) {
+      // answer instead of sustain: short chord stab in the second half
+      const at = start + ctx.beatsPerBar * (0.5 + rng.float() * 0.25);
+      for (const p of notes) {
+        out.push({ t: at, d: ctx.beatsPerBar * 0.35, p, v: 0.3 + section.intensity * 0.18 });
+      }
+    } else {
+      for (const p of notes) {
+        out.push({ t: start, d: ctx.beatsPerBar * 0.99, p, v: 0.35 + section.intensity * 0.2 });
+      }
     }
   }
   return out;
@@ -428,7 +464,7 @@ function makeTitle(rng, theme) {
 // ============================================================= compose
 export function compose(rawPresets, seed) {
   const presets = normalisePresets(rawPresets);
-  const style = STYLES[presets.style];
+  const style = { ...STYLES[presets.style], ...(STYLE_EXTRAS[presets.style] || {}) };
   const mood = MOODS[presets.mood];
   const theme = THEMES[presets.theme];
   const tech = TECHS[presets.tech];
@@ -448,21 +484,51 @@ export function compose(rawPresets, seed) {
   let prevProg = null;
   let prevVoicing = null;
 
+  // Section aliasing: a repeated section reuses the first one's musical
+  // material, so the second verse is a variation rather than a new tune.
+  const firstNameIndex = {};
+  sections.forEach((sec, i) => {
+    if (firstNameIndex[sec.name] == null) firstNameIndex[sec.name] = i;
+  });
+
+  // Modulation: styles may lift the key between sections (whole-step "gear
+  // change" or a pivot). Kept per section so the validator can follow it.
+  const modChance = style.modulation ?? 0.12;
+  let sectionTonic = tonic;
+
+  // A locked track draws from a stream seeded ONLY by the lock, so a new
+  // song seed cannot change it.
+  const trackRng = (name, fallback) => {
+    const locked = presets.lockTracks?.[name] && presets.trackSeeds?.[name];
+    return locked ? new Rng(`locked|${name}|${presets.trackSeeds[name]}`) : fallback;
+  };
+
   sections.forEach((sec, si) => {
-    const rngS = rng.fork('section' + si);
+    const aliasIndex = firstNameIndex[sec.name] ?? si;
+    const rngS = rng.fork('section' + aliasIndex);
+    const isLast = si === sections.length - 1;
+
+    // lift the key on a section boundary, once per song
+    if (si > 0 && rng.fork('mod' + si).chance(modChance)) {
+      sectionTonic = (tonic + (rng.fork('modstep' + si).chance(0.6) ? 2 : 5)) % 12;
+    }
+    const sTonic = sectionTonic;
     const base = SECTION_INTENSITY[sec.name] ?? 0.6;
     const curve = intensityCurve[si % intensityCurve.length];
     const intensity = Math.max(0, Math.min(1,
       base * 0.55 + curve * 0.45 + (mood.tensionBias || 0) * 0.4 + (presets.intensityBias || 0)));
-    const section = { name: sec.name, index: si, bar: barCursor, bars: sec.bars, intensity };
+    const section = {
+      name: sec.name, index: si, bar: barCursor, bars: sec.bars, intensity,
+      key: { tonic: sTonic, mode: scaleName },
+    };
 
     const ctx = {
-      tonic, scaleName, beatsPerBar, mood, barStart: barCursor * beatsPerBar,
+      tonic: sTonic, scaleName, beatsPerBar, mood, barStart: barCursor * beatsPerBar,
       bassRoot: null,
     };
 
     const { chords, prog } = sectionChords(rngS.fork('harmony'), style, mood, section, {
-      tonic, mode, beatsPerBar, prevProg, scaleName,
+      tonic: sTonic, mode, beatsPerBar, prevProg, scaleName,
     });
     prevProg = prog;
 
@@ -490,17 +556,36 @@ export function compose(rawPresets, seed) {
 
     // chords (always, if allowed)
     if (allowed.includes('chords')) {
+      const rngC = rngS.fork('chords');
       for (let bar = 0; bar < sec.bars; bar++) {
         const ch = voiced[bar % voiced.length];
         const start = (barCursor + bar) * beatsPerBar;
         const strum = style.id === 'folk' || style.id === 'rock' ? 0.06 : 0.015;
-        ch.voicing.forEach((p, i) => {
-          tracks.chords.push({ t: start + i * strum, d: beatsPerBar * 0.95, p, v: (0.5 + intensity * 0.3) * (i === 0 ? 1 : 0.85) });
-        });
+        const level = 0.5 + intensity * 0.3;
+        // chord rhythm: sometimes a push on the "and" of 2, sometimes a
+        // staccato double hit — chords stop being one block per bar
+        const rhythm = rngC.chance(style.chordRhythm ?? 0.25)
+          ? (rngC.chance(0.5) ? 'push' : 'double')
+          : 'whole';
+        const hits = rhythm === 'whole'
+          ? [{ at: 0, dur: beatsPerBar * 0.95, v: 1 }]
+          : rhythm === 'push'
+            ? [{ at: 0, dur: beatsPerBar * 0.6, v: 1 }, { at: beatsPerBar * 0.5 + 0.5, dur: beatsPerBar * 0.4, v: 0.8 }]
+            : [{ at: 0, dur: beatsPerBar * 0.45, v: 1 }, { at: beatsPerBar * 0.5, dur: beatsPerBar * 0.4, v: 0.75 }];
+        for (const hit of hits) {
+          ch.voicing.forEach((p, i) => {
+            tracks.chords.push({
+              t: start + hit.at + i * strum,
+              d: Math.max(0.08, hit.dur),
+              p,
+              v: level * hit.v * (i === 0 ? 1 : 0.85),
+            });
+          });
+        }
       }
     }
     if (allowed.includes('bass')) {
-      const rngB = rngS.fork('bass');
+      const rngB = trackRng('bass', rng.fork('bass'));
       for (let bar = 0; bar < sec.bars; bar++) {
         const ch = voiced[bar % voiced.length];
         const bctx = { ...ctx, barStart: (barCursor + bar) * beatsPerBar };
@@ -508,7 +593,7 @@ export function compose(rawPresets, seed) {
       }
     }
     if (allowed.includes('drums') && !thin) {
-      const rngD = rngS.fork('drums');
+      const rngD = trackRng('drums', rng.fork('drums'));
       const steps = beatsPerBar * 4;
       for (let bar = 0; bar < sec.bars; bar++) {
         const dctx = { ...ctx, barStart: (barCursor + bar) * beatsPerBar, mood };
@@ -516,29 +601,50 @@ export function compose(rawPresets, seed) {
       }
     }
     if (allowed.includes('lead')) {
-      const rngL = rngS.fork('lead');
-      tracks.lead.push(...leadSection(rngL, style, ctx, section, voiced));
+      const rngL = trackRng('lead', rng.fork('lead'));
+      const leadNotes = leadSection(rngL, style, ctx, section, voiced);
+      tracks.lead.push(...leadNotes);
+      section.leadNotes = leadNotes;
+      // doubling: rock/folk/chiptune often want the lead an octave up
+      if ((style.doubleLead ?? 0) > 0 && rngS.chance(style.doubleLead)) {
+        for (const n of leadNotes) {
+          if (n.p + 12 <= 96) tracks.lead.push({ ...n, p: n.p + 12, v: n.v * 0.42 });
+        }
+      }
     }
     if (allowed.includes('pad')) {
       const rngP = rngS.fork('pad');
-      tracks.pad.push(...padSection(rngP, ctx, section, voiced));
+      tracks.pad.push(...padSection(rngP, ctx, section, voiced, section.leadNotes || []));
     }
     if (presets.arp && allowed.includes('chords')) {
       const rngA = rngS.fork('arp');
       tracks.arp.push(...arpSection(rngA, ctx, section, voiced));
     }
 
+    if (isLast && sec.bars >= 4) {
+      // an outro fades the arrangement, not just the volume
+      const startBeat = barCursor * beatsPerBar;
+      const span = sec.bars * beatsPerBar;
+      for (const name of Object.keys(tracks)) {
+        for (const n of tracks[name]) {
+          if (n.t < startBeat) continue;
+          const p = Math.min(1, (n.t - startBeat) / span);
+          n.v *= 1 - p * 0.55;
+        }
+      }
+    }
+
     songSections.push({ ...section, chords: section.chords });
     barCursor += sec.bars;
   });
 
-  // humanise each track with its own stream
+  // humanise each track with its own stream (locked tracks keep theirs too)
   for (const k of Object.keys(tracks)) {
-    if (k === 'drums') {
-      tracks.drums = humanise(tracks.drums, rng.fork('hum-drums'), style, mood);
-    } else {
-      tracks[k] = humanise(tracks[k], rng.fork('hum-' + k), style, mood);
-    }
+    const locked = presets.lockTracks?.[k] && presets.trackSeeds?.[k];
+    const stream = locked
+      ? new Rng(`lockedhum|${k}|${presets.trackSeeds[k]}`)
+      : rng.fork('hum-' + k);
+    tracks[k] = humanise(tracks[k], stream, style, mood);
     tracks[k].sort((a, b) => a.t - b.t);
   }
 
@@ -574,6 +680,7 @@ export function compose(rawPresets, seed) {
     lufs: style.lufs ?? -14,
     monoBass: !!style.monoBass,
     sidechain: !!style.sidechain,
+    width: style.width ?? 0.4,
     palette: theme.palette,
     totalNotes: Object.values(tracks).reduce((a, t) => a + t.length, 0),
   };

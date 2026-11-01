@@ -17,6 +17,7 @@
 
 <main id="app">
   <h1 class="sr-only">MusicGen — generative composer studio</h1>
+
   <header class="topbar">
     <div class="transport">
       <button id="play" aria-label="Play or pause">▶</button>
@@ -24,6 +25,8 @@
       <button id="random" aria-label="Random song">Random</button>
       <button id="evolve" aria-label="Evolve: same presets, new seed">Evolve</button>
       <button id="mutate" aria-label="Mutate one axis">Mutate</button>
+      <button id="ab" aria-label="A/B — compare with the previous song" aria-pressed="false">A/B</button>
+      <button id="loop" aria-label="Loop the current section" aria-pressed="false">Loop</button>
       <button id="mute" aria-pressed="false" aria-label="Mute">Mute</button>
       <button id="themetoggle" aria-label="Colour theme: system" title="Colour theme">◐</button>
       <button id="menu" aria-label="More actions" aria-expanded="false">⋯</button>
@@ -31,6 +34,7 @@
     <div class="songline">
       <span id="title">—</span>
       <span id="meta">press Generate</span>
+      <span id="offline" class="chip badge" hidden>offline ready</span>
       <button id="seed" class="chip" title="Copy share link">seed</button>
     </div>
     <div class="vizwrap">
@@ -63,7 +67,7 @@
     </div>
     <div class="row">
       <label for="bpm">BPM</label>
-      <input id="bpm" type="range" min="40" max="200" step="1" />
+      <input id="bpm" type="range" min="20" max="500" step="1" />
       <output id="bpmout">84</output>
       <button class="lock" data-lock="bpm" aria-pressed="false" title="Lock tempo">🔓</button>
     </div>
@@ -110,9 +114,21 @@
         <input id="arp" type="checkbox" />
       </div>
       <div class="row">
+        <label for="lockdrums">Lock drums</label>
+        <input id="lockdrums" type="checkbox" />
+      </div>
+      <div class="row">
+        <label for="locklead">Lock melody</label>
+        <input id="locklead" type="checkbox" />
+      </div>
+      <div class="row">
         <label for="volume">Volume</label>
         <input id="volume" type="range" min="0" max="100" step="1" value="90" />
         <output id="volumeout">90</output>
+      </div>
+      <div class="row">
+        <label for="reset">Defaults</label>
+        <button id="reset" class="ghost">Reset presets</button>
       </div>
     </details>
   </section>
@@ -130,18 +146,36 @@
     <button id="save" class="ghost">Save</button>
   </section>
 
+  <details class="summary">
+    <summary>Song summary (text)</summary>
+    <div id="summary" class="summary-body"></div>
+  </details>
+
   <div id="menu-sheet" class="sheet" hidden>
     <small>Export</small>
-    <button data-act="wav">WAV — 16-bit, normalised to target</button>
+    <button data-act="wav">WAV — normalised to target</button>
     <button data-act="stems">Stems — one WAV per track (zip)</button>
     <button data-act="midi">MIDI — Type 1, DAW-ready</button>
+    <button data-act="json">Song JSON — full note data</button>
+    <button data-act="import">Import song JSON…</button>
     <button data-act="art">Cover art — 1024 px PNG</button>
+    <div class="row sheet-row">
+      <label for="exporttarget">Loudness</label>
+      <select id="exporttarget">
+        <option value="style">Style target</option>
+        <option value="-14">−14 LUFS (streaming)</option>
+        <option value="-11">−11 LUFS (club)</option>
+        <option value="-18">−18 LUFS (ambient)</option>
+        <option value="raw">No normalisation</option>
+      </select>
+    </div>
     <div class="sep"></div>
     <small>Session</small>
     <button data-act="undo">Undo preset change</button>
     <button data-act="redo">Redo preset change</button>
     <button data-act="share">Copy share link</button>
     <button data-act="library">Library</button>
+    <button data-act="install">Install app</button>
     <button data-act="help">Keyboard shortcuts</button>
     <button data-act="close">Close</button>
   </div>
@@ -154,11 +188,13 @@
       <dt>R</dt><dd>Random</dd>
       <dt>E</dt><dd>Evolve</dd>
       <dt>M</dt><dd>Mutate</dd>
+      <dt>B</dt><dd>A/B the previous song</dd>
       <dt>U</dt><dd>Mute</dd>
-      <dt>V</dt><dd>Cycle visualiser</dd>
       <dt>T</dt><dd>Cycle theme: system → light → dark</dd>
+      <dt>V</dt><dd>Cycle visualiser</dd>
       <dt>L</dt><dd>Lock / unlock focused control</dd>
       <dt>1–6</dt><dd>Focus a preset axis</dd>
+      <dt>+ / −</dt><dd>Zoom the piano roll</dd>
       <dt>⌘/Ctrl Z</dt><dd>Undo preset change</dd>
       <dt>Esc</dt><dd>Stop</dd>
       <dt>?</dt><dd>This dialog</dd>
@@ -168,9 +204,12 @@
 
   <dialog id="library">
     <h2>Library</h2>
+    <input id="searchlib" type="search" placeholder="Search title, style, mood…" aria-label="Search the library" />
     <div id="library-list" class="library-list"></div>
     <form method="dialog"><button>Close</button></form>
   </dialog>
+
+  <input id="fileinput" type="file" accept=".json,application/json" aria-label="Import a song JSON file" hidden />
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <p id="live" class="sr-only" aria-live="polite"></p>
