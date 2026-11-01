@@ -1,6 +1,6 @@
 {
   "name": "musicgen",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "private": true,
   "type": "module",
   "description": "A pocket generative composer — offline-first PWA that writes, synthesises, masters and exports music in the browser",

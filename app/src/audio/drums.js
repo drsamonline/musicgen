@@ -57,18 +57,18 @@ function toneHit(ctx, dest, when, { peak, from = 150, to = 45, decay = 0.28, att
 // Metallic hat: six detuned squares, the classic 808 recipe, instead of one
 // noise burst. Only used when the style asks for a "chip" hat.
 function metalHat(ctx, dest, when, vel, decay = 0.05) {
-  const freqs = [205.3, 304.4, 369.6, 522.7, 540, 800];
+  const freqs = [205.3, 304.4, 369.6, 522.7, 540, 800]; // ×3, not ×6: 6 was piercing
   const g = ctx.createGain();
-  decayEnv(g.gain, when, 0.3 * vel, 0.001, decay);
+  decayEnv(g.gain, when, 0.16 * vel, 0.001, decay);
   const bp = ctx.createBiquadFilter();
   bp.type = 'bandpass';
-  bp.frequency.value = 8000;
-  bp.Q.value = 0.8;
+  bp.frequency.value = 6500;
+  bp.Q.value = 0.6;
   g.connect(bp).connect(dest);
   for (const f of freqs) {
     const osc = ctx.createOscillator();
     osc.type = 'square';
-    osc.frequency.value = f * 6;
+    osc.frequency.value = f * 3;
     osc.connect(g);
     osc.start(when);
     osc.stop(when + decay + 0.02);

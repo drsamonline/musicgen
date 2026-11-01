@@ -5,7 +5,7 @@ const base = {
   attack: 0.01, decay: 0.18, sustain: 0.55, release: 0.35,
   cutoff: 3000, q: 1, wave: 'sawtooth', detune: 6, gain: 0.5, sat: 0.15,
   // filter envelope + velocity-to-timbre + analogue drift
-  filterEnv: 0.35, filterAttack: 0.004, filterDecay: 0.16, velToCutoff: 0.5, drift: 2, glide: 0.045,
+  filterEnv: 0.35, filterAttack: 0.004, filterDecay: 0.16, velToCutoff: 0.5, drift: 1.2, glide: 0.045,
 };
 
 export const TECHS = {

@@ -29,11 +29,12 @@ class GranularProcessor extends AudioWorkletProcessor {
       const seed = hash((freq * 1000 + i * 97 + Math.round(when * 1000)) | 0);
       const spread = (seed - 0.5) * 0.5;          // pitch scatter
       const pos = i / count;
+      if (this.grains.length > 120) this.grains.shift();
       this.grains.push({
         t0: when + pos * length + (seed - 0.5) * 0.012,
         dur: grainDur * (0.7 + seed * 0.6),
         freq: freq * (1 + spread * 0.02),
-        amp: vel * (0.35 + seed * 0.4) * (1 - pos * 0.35),
+        amp: vel * (0.22 + seed * 0.22) * (1 - pos * 0.35),
         pan: (hash(i * 31 + Math.round(freq)) - 0.5) * 1.2,
         phase: 0,
         env: 0,
@@ -64,8 +65,9 @@ class GranularProcessor extends AudioWorkletProcessor {
         l += s * (1 - Math.max(0, grain.pan));
         r += s * (1 + Math.min(0, grain.pan));
       }
-      left[i] = Math.max(-1, Math.min(1, l));
-      if (right) right[i] = Math.max(-1, Math.min(1, r));
+      // tanh, not a hard clamp: clamping is what made dense grains crackle
+      left[i] = Math.tanh(l * 1.2);
+      if (right) right[i] = Math.tanh(r * 1.2);
     }
     return true;
   }

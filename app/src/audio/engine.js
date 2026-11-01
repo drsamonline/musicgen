@@ -109,14 +109,32 @@ export function buildGraph(ctx, song) {
   } else {
     master.connect(chain.input);
   }
-  chain.output.connect(ctx.destination);
+  // A safety net no preset can bypass: nothing leaves the app above 0 dBFS
+  // with a hard edge. This is the difference between "loud" and "static".
+  let safety = null;
+  if (typeof ctx.createWaveShaper === 'function') {
+    safety = ctx.createWaveShaper();
+    const n = 2048;
+    const curve = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      // unity at low level, soft knee near full scale: a limiter, not a boost
+      curve[i] = Math.tanh(x);
+    }
+    safety.curve = curve;
+    safety.oversample = '2x';
+    chain.output.connect(safety);
+    safety.connect(ctx.destination);
+  } else {
+    chain.output.connect(ctx.destination);
+  }
 
   let analyser = null;
   if (typeof ctx.createAnalyser === 'function') {
     analyser = ctx.createAnalyser();
     analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0.75;
-    chain.output.connect(analyser);
+    (safety || chain.output).connect(analyser);
   }
 
   const fx = createFxBuses(ctx, song, master);
@@ -434,6 +452,8 @@ export class Player {
     this.intervalMs = 25;
     this.loop = null;
     this.userVolume = 0.9;
+    this.lastTick = 0;
+    this.watchdog = null;
   }
 
   async init() {
@@ -481,6 +501,7 @@ export class Player {
     } else {
       this.timer = setInterval(() => this.tick(), this.intervalMs);
     }
+    this.startWatchdog();
     this.tick();
   }
 
@@ -488,8 +509,27 @@ export class Player {
     this.loop = startSec == null ? null : { start: startSec, end: endSec };
   }
 
+  // If the timer is throttled (background tab, busy thread) the song would
+  // simply stop. The watchdog notices and keeps it alive.
+  startWatchdog() {
+    this.stopWatchdog();
+    this.lastTick = Date.now();
+    this.watchdog = setInterval(() => {
+      if (!this.playing) return;
+      if (Date.now() - this.lastTick > 700) {
+        this.lastTick = Date.now();
+        try { this.tick(); } catch { /* the next tick will retry */ }
+      }
+    }, 500);
+  }
+
+  stopWatchdog() {
+    if (this.watchdog) { clearInterval(this.watchdog); this.watchdog = null; }
+  }
+
   tick() {
     if (!this.playing) return;
+    this.lastTick = Date.now();
     const now = this.ctx.currentTime - this.startCtxTime; // song time at "now"
     const horizon = now + this.lookahead;
 
@@ -526,6 +566,7 @@ export class Player {
   }
 
   stopTimerOnly() {
+    this.stopWatchdog();
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
     if (this.clockNode) {
       try { this.clockNode.port.postMessage({ type: 'stop' }); } catch { /* noop */ }
@@ -587,8 +628,15 @@ export async function renderSong(song, { sampleRate = 44100, tailSec = 2, onProg
   const graph = buildGraph(ctx, song);
   applyAutomation(graph, song, 0, 0);
   const schedule = makeScheduler(graph, song);
-  for (const ev of buildEvents(song, only)) {
-    try { schedule(ev, Math.max(0, ev.sec)); } catch { graph.cap.dropped++; }
+  const events = buildEvents(song, only);
+  for (let i = 0; i < events.length; i++) {
+    try { schedule(events[i], Math.max(0, events[i].sec)); } catch { graph.cap.dropped++; }
+    // yield every few hundred notes: scheduling thousands of nodes in one
+    // go is what makes an export look like a freeze
+    if (i > 0 && i % 250 === 0) {
+      if (onProgress) onProgress(0.15 + (i / events.length) * 0.3);
+      await new Promise((r) => setTimeout(r, 0));
+    }
   }
   if (onProgress) onProgress(0.5);
   const buf = await ctx.startRendering();

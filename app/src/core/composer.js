@@ -22,7 +22,7 @@ const TONIC_WEIGHTS = [
 // Bump this whenever the composer's output changes for the same inputs.
 // Seeds and share links carry it so an old link can say "this will sound
 // different now" instead of silently lying.
-export const COMPOSER_VERSION = 3;
+export const COMPOSER_VERSION = 4;
 
 export const BPM_MIN = 20;
 export const BPM_MAX = 500;
@@ -290,14 +290,26 @@ function makeMotif(rng, ctx, chord, density) {
       });
       p = cands.reduce((a, b) => (Math.abs(b - lastPitch) <= Math.abs(a - lastPitch) ? b : a));
     } else {
-      const step = rng.weighted([-2, -1, 1, 2], [1, 3, 3, 1]);
+      // contour: rise through the first half of the phrase, fall through the
+      // second. A melody that only wanders is the difference between "notes"
+      // and a line.
+      const position = i / Math.max(1, steps - 1);
+      const upBias = position < 0.5 ? 1.6 : 0.55;
+      const step = rng.weighted([-2, -1, 1, 2], [1 * (2 - upBias), 3, 3 * upBias, 1 * upBias]);
       p = fromDeg(degIndex(lastPitch, ctx.tonic, scale) + step, ctx.tonic, scale);
       while (p - lastPitch > 7) p -= 12;
       while (lastPitch - p > 7) p += 12;
     }
     p = clampPitch(p, 48, 88);
-    const dur = mood.staccato > 0.35 && rng.chance(0.5) ? 0.25 : rng.chance(0.25) ? 1 : 0.5;
-    out.push({ t: i * 0.5, d: dur, p, v: (strong ? 0.85 : 0.62) * (0.7 + (mood.velCurve ?? 0.6) * 0.4) });
+    // articulation: mix short and held notes instead of one flat length
+    const artic = rng.weighted(['short', 'mid', 'long'], [mood.staccato ?? 0.2, 3, 1]);
+    const dur = artic === 'short' ? 0.25 : artic === 'long' ? 1 : 0.5;
+    // a small arch in dynamics across the bar: louder at the climax
+    const arch = 0.86 + 0.18 * Math.sin((i / Math.max(1, steps - 1)) * Math.PI);
+    out.push({
+      t: i * 0.5, d: dur, p,
+      v: (strong ? 0.85 : 0.62) * (0.7 + (mood.velCurve ?? 0.6) * 0.4) * arch,
+    });
     lastPitch = p;
   }
   // contour memory: the phrase resolves to a chord tone instead of wandering
@@ -365,6 +377,12 @@ function leadSection(rng, style, ctx, section, chords) {
     } else if (rng.chance(0.35) && development.length) {
       const name = development[rng.int(development.length)];
       notes = applyTransform(name, motif, { rng, span, tonicPc: ctx.tonic, scale: ctx.scaleName });
+    } else if (rng.chance(0.3) && motif.length > 2) {
+      // a repeat with one note changed, so the phrase develops instead of looping
+      notes = motif.map((n) => ({ ...n }));
+      const target = notes[rng.int(notes.length)];
+      target.p = fromDeg(degIndex(target.p, ctx.tonic, scaleOf(ctx.scaleName)) + (rng.chance(0.5) ? 1 : -1),
+        ctx.tonic, scaleOf(ctx.scaleName));
     }
     const src = notes ?? motif;
     for (const n of src) {
@@ -388,6 +406,26 @@ function leadSection(rng, style, ctx, section, chords) {
       }
       out.push({ ...n, t: barStart + n.t, p: clampPitch(p, 50, 90) });
     }
+  }
+
+  // Human phrasing: breathe at the end of every four-bar phrase, swell into
+  // the third bar, and land the section on a longer note.
+  const barSpan = ctx.beatsPerBar;
+  for (let i = out.length - 1; i >= 0; i--) {
+    const n = out[i];
+    const barIndex = Math.floor((n.t - ctx.barStart) / barSpan);
+    const posInBar = (n.t - ctx.barStart) % barSpan;
+    const phrasePos = barIndex % 4;
+    const swell = [0.92, 1.0, 1.06, 0.9][phrasePos] ?? 1;
+    n.v *= swell;
+    // a rest in the last half-beat of each phrase
+    if (phrasePos === 3 && posInBar >= barSpan - 0.5) {
+      out.splice(i, 1);
+      continue;
+    }
+    // the final note of the section is held, not clipped
+    const isLast = i === out.length - 1;
+    if (isLast) n.d = Math.max(n.d, barSpan * 0.9);
   }
   return out;
 }
@@ -442,14 +480,18 @@ function arpSection(rng, ctx, section, chords) {
 }
 
 // ------------------------------------------------------------- humanise
-function humanise(notes, rng, style, mood) {
+function humanise(notes, rng, style, mood, bpm = 100) {
   const swing = style.swing ?? 0;
   return notes.map((n) => {
     const beatPos = n.t % 1;
     const swingShift = Math.abs(beatPos - 0.5) < 1e-6 ? swing * 0.28 : 0;
-    const jitter = gauss(rng) * 0.006;
-    const velJit = 1 + gauss(rng) * 0.06;
-    const lenJit = 1 + gauss(rng) * 0.05;
+    // timing feel is relative to the beat: a slow song can breathe more than
+    // a 500 BPM one, where 6 ms would already be a different note
+    const beatSec = 60 / bpm;
+    const jitterScale = Math.max(0.0015, Math.min(0.012, beatSec * 0.02));
+    const jitter = gauss(rng) * jitterScale;
+    const velJit = 1 + gauss(rng) * 0.07;
+    const lenJit = 1 + gauss(rng) * 0.06;
     return {
       ...n,
       t: Math.max(0, n.t + swingShift + jitter),
@@ -666,7 +708,7 @@ export function compose(rawPresets, seed) {
     const stream = locked
       ? new Rng(`lockedhum|${k}|${presets.trackSeeds[k]}`)
       : rng.fork('hum-' + k);
-    tracks[k] = humanise(tracks[k], stream, style, mood);
+    tracks[k] = humanise(tracks[k], stream, style, mood, presets.bpm);
     tracks[k].sort((a, b) => a.t - b.t);
   }
 

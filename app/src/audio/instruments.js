@@ -12,12 +12,12 @@ export function isOffline(ctx) {
   return typeof ctx.startRendering === 'function';
 }
 
-export function pulseWave(ctx, duty) {
+export function pulseWave(ctx, duty, maxHarmonics = 24) {
   let m = waveCache.get(ctx);
   if (!m) { m = new Map(); waveCache.set(ctx, m); }
-  const key = duty.toFixed(3);
+  const n = Math.max(2, Math.min(24, maxHarmonics));
+  const key = `${duty.toFixed(3)}:${n}`;
   if (m.has(key)) return m.get(key);
-  const n = 24;
   const real = new Float32Array(n);
   const imag = new Float32Array(n);
   for (let i = 1; i < n; i++) imag[i] = (2 / (i * Math.PI)) * Math.sin(i * Math.PI * duty);
@@ -31,14 +31,15 @@ export function pulseWave(ctx, duty) {
 // crossfading two oscillators. This is the real thing, not two detuned saws.
 const tableCache = new WeakMap();
 
-function frameWave(ctx, frame, harmonics = 24) {
+function frameWave(ctx, frame, harmonics = 24, limit = 0) {
   let m = tableCache.get(ctx);
   if (!m) { m = new Map(); tableCache.set(ctx, m); }
-  const key = `f${frame}`;
+  const usable = limit ? Math.max(2, Math.min(harmonics, Math.floor(limit / 60))) : harmonics;
+  const key = `f${frame}:${usable}`;
   if (m.has(key)) return m.get(key);
-  const real = new Float32Array(harmonics);
-  const imag = new Float32Array(harmonics);
-  for (let n = 1; n < harmonics; n++) {
+  const real = new Float32Array(usable);
+  const imag = new Float32Array(usable);
+  for (let n = 1; n < usable; n++) {
     let amp = 0;
     if (frame === 0) amp = n === 1 ? 1 : 0;                       // sine
     else if (frame === 1) amp = n % 2 === 1 ? 1 / (n * n) : 0;    // triangle
@@ -72,14 +73,32 @@ export function noiseBuffer(ctx, seconds = 1) {
 }
 
 // ---------------------------------------------------------------- helpers
+// One timer drains a queue of pending disconnects instead of thousands of
+// per-voice setTimeout calls (which is real overhead on a long song).
+const pending = [];
+let pump = null;
+
+function startPump() {
+  if (pump) return;
+  pump = setInterval(() => {
+    const now = Date.now();
+    for (let i = pending.length - 1; i >= 0; i--) {
+      const entry = pending[i];
+      if (entry.at > now) continue;
+      for (const n of entry.nodes) {
+        try { n.disconnect(); } catch { /* already gone */ }
+      }
+      pending.splice(i, 1);
+    }
+    if (!pending.length) { clearInterval(pump); pump = null; }
+  }, 120);
+}
+
 function disconnectLater(ctx, nodes, at) {
   if (isOffline(ctx)) return;
-  const ms = Math.max(0, (at - ctx.currentTime) * 1000) + 100;
-  setTimeout(() => {
-    for (const n of nodes) {
-      try { n.disconnect(); } catch { /* already gone */ }
-    }
-  }, ms);
+  const delay = Math.max(0, (at - ctx.currentTime) * 1000) + 120;
+  pending.push({ at: Date.now() + delay, nodes });
+  startPump();
 }
 
 function env(param, when, dur, spec, peak) {
@@ -135,6 +154,22 @@ function saturator(ctx, amount) {
   return ws;
 }
 
+// Nothing may be synthesised above this: harmonics and FM sidebands that pass
+// Nyquist fold back as aliasing, which is exactly the "static" you hear.
+export function nyquistLimit(ctx) {
+  return (ctx.sampleRate || 44100) * 0.45;
+}
+
+function safeHarmonics(ctx, freq, wanted) {
+  return safeHarmonicsFor(ctx.sampleRate || 44100, freq, wanted);
+}
+
+// Exported so the test suite can assert the rule without an AudioContext.
+export function safeHarmonicsFor(sampleRate, freq, wanted) {
+  const limit = sampleRate * 0.45;
+  return Math.max(1, Math.min(wanted, Math.floor(limit / Math.max(20, freq))));
+}
+
 // ---------------------------------------------------------------- voices
 export function synthVoice(ctx, dest, opts) {
   const {
@@ -171,9 +206,12 @@ export function synthVoice(ctx, dest, opts) {
     const car = ctx.createOscillator();
     const mod = ctx.createOscillator();
     const modGain = ctx.createGain();
-    const idx = (spec.fmIndex ?? 1.5) * freq;
+    const ratio = Math.min(8, spec.fmRatio ?? 2);
+    const limit = nyquistLimit(ctx);
+    // the modulator's peak deviation must not push the carrier past Nyquist
+    const idx = Math.min((spec.fmIndex ?? 1.5) * freq, Math.max(0, limit - freq) * 0.9);
     pitchStart(car, freq);
-    mod.frequency.value = freq * (spec.fmRatio ?? 2);
+    mod.frequency.value = Math.min(limit, freq * ratio);
     modGain.gain.setValueAtTime(idx, when);
     modGain.gain.exponentialRampToValueAtTime(Math.max(1, idx * 0.15), when + Math.max(0.05, dur * 0.8));
     mod.connect(modGain).connect(car.frequency);
@@ -184,7 +222,7 @@ export function synthVoice(ctx, dest, opts) {
     car.stop(stopAt); mod.stop(stopAt);
   } else if (engine === 'chiptune') {
     const osc = ctx.createOscillator();
-    osc.setPeriodicWave(pulseWave(ctx, spec.duty ?? 0.5));
+    osc.setPeriodicWave(pulseWave(ctx, spec.duty ?? 0.5, safeHarmonics(ctx, freq, 24)));
     pitchStart(osc, freq);
     osc.connect(filter);
     nodes.push(osc, filter, out);
@@ -192,7 +230,7 @@ export function synthVoice(ctx, dest, opts) {
     osc.start(when);
     osc.stop(stopAt);
   } else if (engine === 'additive') {
-    const count = Math.min(10, spec.harmonics ?? 8);
+    const count = safeHarmonics(ctx, freq, Math.min(10, spec.harmonics ?? 8));
     const base = ctx.createGain();
     base.gain.value = 1;
     const oscs = [];
@@ -216,8 +254,8 @@ export function synthVoice(ctx, dest, opts) {
     const endFrame = Math.min(frames - 1, startFrame + 1);
     const a = ctx.createOscillator();
     const b = ctx.createOscillator();
-    a.setPeriodicWave(frameWave(ctx, startFrame));
-    b.setPeriodicWave(frameWave(ctx, endFrame));
+    a.setPeriodicWave(frameWave(ctx, startFrame, 24, nyquistLimit(ctx) / Math.max(1, freq / 60)));
+    b.setPeriodicWave(frameWave(ctx, endFrame, 24, nyquistLimit(ctx) / Math.max(1, freq / 60)));
     pitchStart(a, freq);
     pitchStart(b, freq);
     const mix = ctx.createGain();
@@ -281,15 +319,15 @@ export function synthVoice(ctx, dest, opts) {
     src.type = 'sawtooth';
     pitchStart(src, freq);
     const sum = ctx.createGain();
-    sum.gain.value = 0.6;
+    sum.gain.value = 0.45;
     const nodes2 = [];
     vowel.forEach((centre, i) => {
       const bp = ctx.createBiquadFilter();
       bp.type = 'bandpass';
       bp.frequency.setValueAtTime(centre * (spec.formantShift ?? 1), when);
-      bp.Q.value = 6 + i * 2;
+      bp.Q.value = 3 + i * 1.5;
       const g = ctx.createGain();
-      g.gain.value = 1 / (i + 1.4);
+      g.gain.value = 0.8 / (i + 1.4);
       src.connect(bp).connect(g).connect(sum);
       nodes2.push(bp, g);
     });
@@ -336,7 +374,7 @@ export function synthVoice(ctx, dest, opts) {
     mix.gain.value = 0.5;
     o1.connect(mix);
     o2.connect(mix);
-    if (freq < 180) {
+    if (freq < 180 && freq / 2 > 25) {
       const sub = ctx.createOscillator();
       const subGain = ctx.createGain();
       sub.type = 'sine';

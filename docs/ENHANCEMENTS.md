@@ -175,6 +175,20 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 
 ---
 
+## What v2.4.0 closed
+
+**"Stops midway."** The clock worklet could never attach — `AudioWorkletNode` rejects `numberOfOutputs: 0`, so the constructor threw, was caught, and the app silently fell back to `setInterval`. A throttled tab then stopped scheduling and the song simply ended. Now there is a **watchdog**: if no tick arrives for 700 ms while playing, the scheduler is kicked back to life. A 3-second continuity test asserts the event cursor keeps advancing.
+
+**"Static, too loud, doesn't mix."** Three real causes:
+
+- **Aliasing.** Additive partials, FM sidebands, wavetable frames and pulse harmonics were free to cross Nyquist, and everything above it folds back as noise. Every oscillator now asks `safeHarmonicsFor(sampleRate, freq, …)` how many partials it may have, and the FM index is clamped so its sidebands stay under the limit.
+- **Hard clipping.** The granular worklet clamped with `Math.min/max`, the waveguide double-boosted, and nothing protected the master. The granular engine now soft-clips through `tanh`, and the master has a **safety waveshaper** (unity at low level, soft knee near full scale) that no preset can bypass.
+- **Resonant, piercing layers.** The formant bank ran at Q 6–10 on a saw, and the "metallic" hat multiplied its six squares by six. Both are now gentler (Q 3–4.5, ×3 with a lower band-pass).
+
+**"More human."** The composer now phrases: the motif rises through the first half and falls through the second, articulations mix short/mid/held instead of one flat length, dynamics arch across each bar, phrases swell into bar three and breathe with a rest at the end, section endings are held rather than clipped, repeats vary one note instead of looping exactly, and timing jitter scales with tempo (a slow song can breathe, a 500 BPM one cannot).
+
+**"Hang."** Export scheduling now yields to the event loop every 250 notes, so a long render no longer freezes the tab, and node cleanup goes through one shared queue instead of a timer per voice.
+
 ## What v2.3.0 closed
 
 **The mix was wrong, and the metrics found it.** Per-track LUFS measurement showed the bass sitting **18 dB over the drums** — the app was, in effect, playing a bass solo with everything else buried. That is the "not proper, glitches" report. Fixed with a measured per-track trim table, a drum-bus compressor (punch kept, peaks controlled), a softer bass attack, and a master gain that leaves the limiter some room. The mix-balance test that let this through was tightened from "within 30 dB" to "within 18 dB, and the bass may not be more than 12 dB over the drums".

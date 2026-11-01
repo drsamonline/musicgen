@@ -7,7 +7,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-c6f24e.svg)](LICENSE)
 [![dependencies: 0](https://img.shields.io/badge/dependencies-0-9aa8ff.svg)](#)
 [![tempo: 20–500 BPM](https://img.shields.io/badge/tempo-20--500%20BPM-9aa8ff.svg)](#)
-[![size: 68 KB gzipped](https://img.shields.io/badge/size-68%20KB%20gzipped-9aa8ff.svg)](#)
+[![size: 70 KB gzipped](https://img.shields.io/badge/size-68%20KB%20gzipped-9aa8ff.svg)](#)
 [![PWA: offline-first](https://img.shields.io/badge/PWA-offline--first-c6f24e.svg)](#)
 [![web audio api](https://img.shields.io/badge/web%20audio-api-ff9f6b.svg)](#)
 
@@ -72,8 +72,8 @@ npm run audit
 ## Tests
 
 ```bash
-npm test              # 32 unit tests, no browser needed
-npm run test:browser  # 85 tests in real Chromium with real Web Audio
+npm test              # 34 unit tests, no browser needed
+npm run test:browser  # 90 tests in real Chromium with real Web Audio
 npm run lint          # determinism lint: no Math.random / Date.now in pure modules
 npm run budget        # shell size, precache completeness, no external requests
 npm run visual        # pixel-diff the studio against committed baselines
@@ -87,6 +87,9 @@ The suite asserts, rather than claims:
 - musicality — 330 style × mood × seed cases through the theory validator
 - audio — an offline render measured for silence, clipping and LUFS against the style target
 - exports — WAV byte length, MIDI header and track count, zip archive structure
+- continuity — a 3-second playback run whose event cursor must keep advancing, plus a watchdog test
+- anti-aliasing — partial counts asserted against Nyquist at 22.05/44.1/48 kHz
+- clipping — master peak ≤ 1.0 and no sample-to-sample jump above 0.9 in a dense render
 - worklets — both processors render audio and the modules load in an offline context
 - tempo — 20 BPM and 500 BPM both compose, render and validate; the range is clamped at both ends
 - audio integrity — a dense render has no silent holes, no voices are dropped, the pool stays inside its cap at 7/8 and 500 BPM

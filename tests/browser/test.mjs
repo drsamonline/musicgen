@@ -266,6 +266,48 @@ try {
     check(`${row.style} does not clip`, row.peak < 0, `${row.peak} dBTP`);
   }
 
+  console.log('\nPlayback continuity (the "stops midway" bug)');
+  const continuity = await page.evaluate(async () => {
+    const { compose } = await import('./src/core/composer.js');
+    const { Player } = await import('./src/audio/engine.js');
+    const song = compose({ style: 'lofi', mood: 'calm', theme: 'rain', tech: 'analog', bpm: 120, type: 'loop' }, 'continuity');
+    const p = new Player(song);
+    await p.init();
+    if (p.ctx.state === 'suspended') await p.ctx.resume();
+    await p.play();
+    const marks = [];
+    for (let i = 0; i < 6; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      marks.push({ pos: +p.position.toFixed(2), idx: p.idx, dropped: p.graph.cap.dropped });
+    }
+    const stillPlaying = p.playing;
+    p.stop();
+    await p.close();
+    return { marks, stillPlaying, events: marks[marks.length - 1].idx };
+  });
+  const advancing = continuity.marks.every((m, i) => i === 0 || m.idx >= continuity.marks[i - 1].idx);
+  check('scheduler keeps advancing for 3 seconds', advancing && continuity.marks[5].idx > continuity.marks[1].idx,
+    continuity.marks.map((m) => `${m.pos}s:${m.idx}`).join(' '));
+  check('playback is still running after 3 s', continuity.stillPlaying);
+  check('nothing was dropped during the run', continuity.marks[5].dropped === 0, `${continuity.marks[5].dropped} dropped`);
+
+  console.log('\nClipping and click guard');
+  const clean = await page.evaluate(async () => {
+    const { compose } = await import('./src/core/composer.js');
+    const { renderSong } = await import('./src/audio/engine.js');
+    const song = compose({ style: 'rock', mood: 'epic', theme: 'desert', tech: 'analog', bpm: 140, type: 'loop' }, 'clean');
+    const buf = await renderSong(song, { sampleRate: 22050, tailSec: 0.2 });
+    const d = buf.getChannelData(0);
+    let peak = 0, maxDelta = 0;
+    for (let i = 1; i < d.length; i++) {
+      peak = Math.max(peak, Math.abs(d[i]));
+      maxDelta = Math.max(maxDelta, Math.abs(d[i] - d[i - 1]));
+    }
+    return { peak: +peak.toFixed(3), maxDelta: +maxDelta.toFixed(3) };
+  });
+  check('master never exceeds full scale', clean.peak <= 1.0, `peak ${clean.peak}`);
+  check('no sample-to-sample jumps (clicks)', clean.maxDelta < 0.9, `max delta ${clean.maxDelta}`);
+
   console.log('\nWorklet engines');
   const worklets = await page.evaluate(async () => {
     const { compose } = await import('./src/core/composer.js');

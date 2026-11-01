@@ -12,6 +12,7 @@ import { encodeWav, analyseBuffer } from '../../app/src/export/wav.js';
 import { songToMidi } from '../../app/src/export/midi.js';
 import { integratedLufs } from '../../app/src/audio/lufs.js';
 import { encodeState, decodeState } from '../../app/src/export/artwork.js';
+import { safeHarmonicsFor } from '../../app/src/audio/instruments.js';
 import { zipStore, crc32 } from '../../app/src/export/zip.js';
 
 let pass = 0;
@@ -216,11 +217,28 @@ test('golden seeds are stable', () => {
   });
   // A change here is a deliberate composer change — update the snapshot on purpose.
   const snapshot = [
-    'The Window|207|8|C lydian',
-    'Sunrise Set / Firework|309|8|F ionian',
-    'Dash Glow / Toll Road|325|8|C mixolydian',
+    'The Window|218|8|C lydian',
+    'Sunrise Set / Firework|312|8|F ionian',
+    'Dash Glow / Toll Road|318|8|C mixolydian',
   ];
   eq(JSON.stringify(hashes), JSON.stringify(snapshot), 'golden seeds drifted');
+});
+
+console.log('\nAnti-aliasing');
+test('harmonic count shrinks as pitch rises', () => {
+  const low = safeHarmonicsFor(44100, 110, 24);
+  const high = safeHarmonicsFor(44100, 3000, 24);
+  assert(low >= high, `low ${low} should allow at least as many as high ${high}`);
+  assert(high <= Math.floor((44100 * 0.45) / 3000), `high harmonics ${high} exceed Nyquist`);
+  assert(high >= 1, 'must keep at least one partial');
+});
+test('a 44.1k context and a 22k context both stay under Nyquist', () => {
+  for (const sr of [44100, 22050, 48000]) {
+    for (const f of [55, 440, 1200, 4000]) {
+      const n = safeHarmonicsFor(sr, f, 24);
+      assert(f * n < sr * 0.46, `${sr}Hz @ ${f}Hz: partial ${n} lands at ${f * n}Hz`);
+    }
+  }
 });
 
 console.log('\nProperty checks');
