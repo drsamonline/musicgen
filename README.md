@@ -7,7 +7,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-c6f24e.svg)](LICENSE)
 [![dependencies: 0](https://img.shields.io/badge/dependencies-0-9aa8ff.svg)](#)
 [![tempo: 20–500 BPM](https://img.shields.io/badge/tempo-20--500%20BPM-9aa8ff.svg)](#)
-[![size: 70 KB gzipped](https://img.shields.io/badge/size-68%20KB%20gzipped-9aa8ff.svg)](#)
+[![size: 72 KB gzipped](https://img.shields.io/badge/size-68%20KB%20gzipped-9aa8ff.svg)](#)
 [![PWA: offline-first](https://img.shields.io/badge/PWA-offline--first-c6f24e.svg)](#)
 [![web audio api](https://img.shields.io/badge/web%20audio-api-ff9f6b.svg)](#)
 
@@ -48,7 +48,7 @@ Then use your browser's **Install** / **Add to Home Screen** (iOS: Share → Add
 
 **The composer** — eleven stages, each testable: key and mode → harmonic grid (2nd-order Markov over style progressions, modal interchange) → voicing with a voice-leading solver → bass → drums (groove templates, Euclidean layers, phrase fills) → motif → development transforms → pad and counter-line → arp → humanise → tension curve.
 
-**The presets** — 11 styles, 10 moods, 10 themes, 8 song types, 7 synthesis technologies, plus a compatibility table that maps styles to allowed moods and engines. Tempo runs **20–500 BPM**; per-track locks freeze the drums or the melody while you reroll everything else. Every share link carries the composer version, so an old seed can tell you it will sound different instead of silently lying.
+**The presets** — 11 styles, 10 moods, 10 themes, 8 song types, 7 synthesis technologies, plus a compatibility table that maps styles to allowed moods and engines. Tempo is a **map, not a number**: choruses lift, verses settle, every phrase gets a little rubato and the last two bars ease off, so a song breathes instead of clicking along. The BPM dial sets the centre and *Tempo drift* sets how far it may wander (0–35%). Range: **20–500 BPM**; per-track locks freeze the drums or the melody while you reroll everything else. Every share link carries the composer version, so an old seed can tell you it will sound different instead of silently lying.
 
 **The synthesis** — subtractive, FM, chiptune (real `PeriodicWave` pulses), additive, a six-frame **wavetable with a real morph**, Karplus-Strong, a **formant/vowel** layer and noise instruments, plus two **AudioWorklet** engines (granular and a waveguide) with native fallbacks; a drum kit built from oscillators and filtered noise; generated convolution reverb, tempo-synced delay and chorus; glue compressor and limiter on the master, mono bass below 120 Hz, sidechain ducking for EDM, a filter envelope and velocity-to-timbre on every voice, analogue drift, and a stereo-width tap. A voice pool steals the quietest voice with a fade; the scheduler runs a 200 ms lookahead and skips late notes instead of firing them in a burst.
 
@@ -72,8 +72,8 @@ npm run audit
 ## Tests
 
 ```bash
-npm test              # 34 unit tests, no browser needed
-npm run test:browser  # 90 tests in real Chromium with real Web Audio
+npm test              # 39 unit tests, no browser needed
+npm run test:browser  # 96 tests in real Chromium with real Web Audio
 npm run lint          # determinism lint: no Math.random / Date.now in pure modules
 npm run budget        # shell size, precache completeness, no external requests
 npm run visual        # pixel-diff the studio against committed baselines
@@ -92,6 +92,7 @@ The suite asserts, rather than claims:
 - clipping — master peak ≤ 1.0 and no sample-to-sample jump above 0.9 in a dense render
 - worklets — both processors render audio and the modules load in an offline context
 - tempo — 20 BPM and 500 BPM both compose, render and validate; the range is clamped at both ends
+- variable tempo — the map integrates and inverts, every scheduled event matches `secondsAt(beat)`, the render length equals the song's duration, and each section can sit at its own BPM
 - audio integrity — a dense render has no silent holes, no voices are dropped, the pool stays inside its cap at 7/8 and 500 BPM
 - loudness regression — three styles rendered offline and checked against their LUFS target and peak ceiling
 - mix balance — every track rendered solo, checked for being audible, not buried, and not letting the drums dominate

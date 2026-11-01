@@ -5,6 +5,7 @@ import { createFxBuses } from './fx.js';
 import { createMasterChain } from './mastering.js';
 import { freqOf, pc } from '../core/theory.js';
 import { TECHS } from '../presets/techs.js';
+import { makeTempoMap, DEFAULT_DRIFT } from '../core/tempo.js';
 
 export const TRACK_NAMES = ['drums', 'bass', 'chords', 'lead', 'pad', 'arp', 'bed'];
 
@@ -265,12 +266,24 @@ export function buildGraph(ctx, song) {
 }
 
 // ---------------------------------------------------------------- scheduling
+// The song's tempo map, rebuilt from its segments (the song JSON stores data,
+// not closures).
+export function tempoMapOf(song) {
+  if (song.tempo?.segments?.length) {
+    return makeTempoMap(song.tempo.segments, {
+      base: song.tempo.base ?? song.bpm,
+      drift: song.tempo.drift ?? DEFAULT_DRIFT,
+    });
+  }
+  return makeTempoMap([{ beat: 0, bpm: song.bpm || 100 }], { base: song.bpm || 100, drift: 0 });
+}
+
 export function buildEvents(song, only = null) {
-  const spb = 60 / (song.bpm || 100);
+  const map = tempoMapOf(song);
   const events = [];
   const list = only ? TRACK_NAMES.filter((t) => only.includes(t)) : TRACK_NAMES;
   for (const track of list) {
-    for (const n of song.tracks[track] || []) events.push({ sec: n.t * spb, track, n });
+    for (const n of song.tracks[track] || []) events.push({ sec: map.secondsAt(n.t), beat: n.t, track, n });
   }
   events.sort((a, b) => a.sec - b.sec || a.track.localeCompare(b.track));
   return events;
@@ -330,14 +343,14 @@ const BED_SPEC = {
 // Automation envelopes drawn from the tension curve: each section opens the
 // track tone filter and the reverb send as it gets more intense.
 export function applyAutomation(graph, song, t0 = 0, fromSec = 0) {
-  const spb = 60 / (song.bpm || 100);
+  const map = tempoMapOf(song);
   const ctx = graph.ctx;
   for (const name of TRACK_NAMES) {
     const t = graph.tracks[name];
     if (!t?.tone) continue;
     for (const sec of song.sections) {
-      const start = t0 + sec.bar * song.beatsPerBar * spb - fromSec;
-      const end = start + sec.bars * song.beatsPerBar * spb;
+      const start = t0 + map.secondsAt(sec.bar * song.beatsPerBar) - fromSec;
+      const end = t0 + map.secondsAt((sec.bar + sec.bars) * song.beatsPerBar) - fromSec;
       if (end < ctx.currentTime) continue;
       const at = Math.max(start, ctx.currentTime);
       const cutoff = 900 + sec.intensity * 13000;
@@ -350,7 +363,8 @@ export function applyAutomation(graph, song, t0 = 0, fromSec = 0) {
 }
 
 export function makeScheduler(graph, song) {
-  const spb = 60 / (song.bpm || 100);
+  const map = tempoMapOf(song);
+  const durOf = (n) => Math.max(0.03, map.secondsAt(n.t + n.d) - map.secondsAt(n.t));
   const intensityAt = sectionIntensity(song);
   const tech = graph.tech;
   const offline = isOffline(graph.ctx);
@@ -373,12 +387,12 @@ export function makeScheduler(graph, song) {
       const spec = track === 'bed' ? BED_SPEC : (tech.instruments[track] || tech.instruments.chords);
       try {
         wnode.node.port.postMessage({
-          type: 'note', when, dur: Math.max(0.05, n.d * spb),
+          type: 'note', when, dur: Math.max(0.05, durOf(n)),
           freq: tuneFreq(n.p),
           vel: n.v * (wnode.engine === 'waveguide' ? 2.4 : 1.1),
           damping: spec.damping ?? 0.6, brightness,
         });
-        graph.cap.active.push({ end: when + Math.max(0.05, n.d * spb) + 0.6, out: null, vel: n.v });
+        graph.cap.active.push({ end: when + durOf(n) + 0.6, out: null, vel: n.v });
         return;
       } catch { /* fall through to native synthesis */ }
     }
@@ -414,16 +428,16 @@ export function makeScheduler(graph, song) {
     let glideFrom = null;
     if (track === 'bass' || track === 'lead') {
       const prev = graph.lastNote[track];
-      const endSec = n.t * spb;
+      const endSec = map.secondsAt(n.t);
       if (prev && endSec - prev.end < 0.09 && Math.abs(n.p - prev.p) <= 7 && n.p !== prev.p) {
         glideFrom = tuneFreq(prev.p);
       }
-      graph.lastNote[track] = { p: n.p, end: endSec + Math.max(0.03, n.d * spb) };
+      graph.lastNote[track] = { p: n.p, end: endSec + durOf(n) };
     }
 
     const voice = synthVoice(graph.ctx, graph.tracks[track].input, {
       when,
-      dur: Math.max(0.03, n.d * spb),
+      dur: durOf(n),
       freq: tuneFreq(n.p),
       vel: n.v,
       spec,

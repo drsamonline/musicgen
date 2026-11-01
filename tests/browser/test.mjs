@@ -23,7 +23,8 @@ function launchOptions(extra = []) {
   const opts = {
     headless: true,
     protocolTimeout: 600000,
-    args: ['--no-sandbox', '--disable-dev-shm-usage', '--autoplay-policy=no-user-gesture-required', ...extra],
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--js-flags=--max-old-space-size=3072',
+      '--autoplay-policy=no-user-gesture-required', ...extra],
   };
   if (process.env.CHROME_PATH) opts.executablePath = process.env.CHROME_PATH;
   else if (fs.existsSync('/usr/local/bin/chromium')) opts.executablePath = '/usr/local/bin/chromium';
@@ -266,11 +267,50 @@ try {
     check(`${row.style} does not clip`, row.peak < 0, `${row.peak} dBTP`);
   }
 
+  console.log('\nVariable tempo');
+  const varia = await page.evaluate(async () => {
+    const { compose } = await import('./src/core/composer.js');
+    const { buildEvents, renderSong, tempoMapOf } = await import('./src/audio/engine.js');
+    const song = compose({ style: 'cinematic', mood: 'epic', theme: 'space', tech: 'analog', bpm: 100, type: 'loop', tempoDrift: 0.18 }, 'vario');
+    const map = tempoMapOf(song);
+    const events = buildEvents(song);
+    // event seconds must equal the map's idea of their beat
+    let worst = 0;
+    for (const ev of events.slice(0, 400)) {
+      worst = Math.max(worst, Math.abs(ev.sec - map.secondsAt(ev.beat)));
+    }
+    const buf = await renderSong(song, { sampleRate: 16000, tailSec: 0.15 });
+    const rendered = buf.length / buf.sampleRate;
+    // per-section tempo, read from a full-length song (not rendered: memory)
+    const full = compose({ style: 'cinematic', mood: 'epic', theme: 'space', tech: 'analog', bpm: 100, type: 'full', tempoDrift: 0.18 }, 'vario-full');
+    const fullMap = tempoMapOf(full);
+    const byName = {};
+    for (const sec of full.sections) byName[sec.name] = Math.round(fullMap.bpmAt(sec.bar * full.beatsPerBar));
+    return {
+      segments: song.tempo.segments.length,
+      range: song.bpmRange.map((v) => Math.round(v)),
+      worstDrift: +worst.toFixed(6),
+      duration: +song.durationSec.toFixed(2),
+      rendered: +rendered.toFixed(2),
+      byName,
+      mapDuration: +map.secondsAt(song.bars * song.beatsPerBar).toFixed(2),
+    };
+  });
+  check('song has a tempo map with several segments', varia.segments > 4, `${varia.segments} segments`);
+  check('tempo range is real', varia.range[1] - varia.range[0] >= 8, varia.range.join('–'));
+  check('event times follow the tempo map', varia.worstDrift < 1e-6, `worst ${varia.worstDrift}s`);
+  check('duration comes from the map', Math.abs(varia.duration - varia.mapDuration) < 0.01,
+    `${varia.duration} vs ${varia.mapDuration}`);
+  check('render length matches the song', Math.abs(varia.rendered - varia.duration) < 1.0,
+    `${varia.rendered}s vs ${varia.duration}s`);
+  check('sections have their own tempo', Object.keys(varia.byName).length > 1
+    && new Set(Object.values(varia.byName)).size > 1, JSON.stringify(varia.byName));
+
   console.log('\nPlayback continuity (the "stops midway" bug)');
   const continuity = await page.evaluate(async () => {
     const { compose } = await import('./src/core/composer.js');
     const { Player } = await import('./src/audio/engine.js');
-    const song = compose({ style: 'lofi', mood: 'calm', theme: 'rain', tech: 'analog', bpm: 120, type: 'loop' }, 'continuity');
+    const song = compose({ style: 'lofi', mood: 'calm', theme: 'rain', tech: 'analog', bpm: 120, type: 'loop', tempoDrift: 0.2 }, 'continuity');
     const p = new Player(song);
     await p.init();
     if (p.ctx.state === 'suspended') await p.ctx.resume();
@@ -389,7 +429,7 @@ try {
     const tracks = ['drums', 'bass', 'chords', 'lead', 'pad'].filter((t) => (song.tracks[t] || []).length);
     const rows = [];
     for (const track of tracks) {
-      const buf = await renderSong(song, { sampleRate: 22050, tailSec: 0.2, only: [track] });
+      const buf = await renderSong(song, { sampleRate: 16000, tailSec: 0.15, only: [track] });
       const d = buf.getChannelData(0);
       let s = 0;
       for (let i = 0; i < d.length; i++) s += d[i] * d[i];
@@ -591,20 +631,41 @@ try {
   check('fixed seed updates the specimen', /128 BPM/.test(seeds.meta || ''), seeds.meta);
 
   console.log('\nInteractions');
-  await page.goto(`${base}app/`, { waitUntil: 'networkidle0' });
-  await page.waitForFunction(() => document.getElementById('title').textContent !== '—', { timeout: 15000 });
-  const titleNow = await page.$eval('#title', (el) => el.textContent);
+  // the browser can detach a frame under load; one retry keeps the suite honest
+  async function gotoStudio() {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await page.goto(`${base}app/`, { waitUntil: 'networkidle0' });
+        await page.waitForFunction(() => document.getElementById('title').textContent !== '—', { timeout: 15000 });
+        return;
+      } catch (err) {
+        if (attempt === 1) throw err;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+  }
+  async function readTitle() {
+    try {
+      return await page.$eval('#title', (el) => el.textContent);
+    } catch {
+      await gotoStudio();
+      return page.$eval('#title', (el) => el.textContent);
+    }
+  }
+  await gotoStudio();
+  const titleNow = await readTitle();
   await page.click('#random');
   await new Promise((r) => setTimeout(r, 600));
-  const afterRandom = await page.$eval('#title', (el) => el.textContent);
+  const afterRandom = await readTitle();
   check('random produces a new song', afterRandom !== titleNow, `${titleNow} -> ${afterRandom}`);
   await page.click('#evolve');
   await new Promise((r) => setTimeout(r, 600));
-  const afterEvolve = await page.$eval('#title', (el) => el.textContent);
+  const afterEvolve = await readTitle();
   check('evolve changes the song', typeof afterEvolve === 'string' && afterEvolve.length > 0);
   await page.select('#style', 'jazz');
   await new Promise((r) => setTimeout(r, 700));
-  const jazzMeta = await page.$eval('#meta', (el) => el.textContent);
+  let jazzMeta = '';
+  try { jazzMeta = await page.$eval('#meta', (el) => el.textContent); } catch { await gotoStudio(); }
   check('style change regenerates', jazzMeta.includes('Jazz'), jazzMeta);
   check('no console errors after interaction', errors.length === 0, errors.slice(0, 3).join(' | '));
 

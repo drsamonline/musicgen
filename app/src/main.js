@@ -8,7 +8,8 @@ import { THEMES } from './presets/themes.js';
 import { TYPES } from './presets/types.js';
 import { TECHS } from './presets/techs.js';
 import { randomPresets } from './presets/compatibility.js';
-import { Player, renderSong } from './audio/engine.js';
+import { Player, renderSong, tempoMapOf } from './audio/engine.js';
+import { describeTempo } from './core/tempo.js';
 import { encodeWav, analyseBuffer, normalisationGain, download } from './export/wav.js';
 import { songToMidi } from './export/midi.js';
 import { zipStore } from './export/zip.js';
@@ -33,7 +34,7 @@ const els = {
   viz: $('viz'), progressbar: $('progressbar'),
   style: $('style'), mood: $('mood'), theme: $('theme'), bpm: $('bpm'),
   bpmout: $('bpmout'), type: $('type'), tech: $('tech'),
-  timesig: $('timesig'), intensity: $('intensity'), intensityout: $('intensityout'),
+  timesig: $('timesig'), tempodrift: $('tempodrift'), tempodriftout: $('tempodriftout'), intensity: $('intensity'), intensityout: $('intensityout'),
   swing: $('swing'), swingout: $('swingout'), chaos: $('chaos'), chaosout: $('chaosout'),
   arp: $('arp'), lockdrums: $('lockdrums'), locklead: $('locklead'),
   microtuning: $('microtuning'), settings: $('settings'), settingsDialog: $('settings-dialog'),
@@ -94,6 +95,8 @@ function syncControls() {
   els.bpm.value = String(p.bpm);
   els.bpmout.textContent = String(p.bpm);
   els.timesig.value = `${p.timeSig[0]}x${p.timeSig[1]}`;
+  els.tempodrift.value = String(Math.round((p.tempoDrift ?? 0.08) * 100));
+  els.tempodriftout.textContent = `${Math.round((p.tempoDrift ?? 0.08) * 100)}%`;
   els.intensity.value = String(Math.round((p.intensityBias || 0) * 100));
   els.intensityout.textContent = String(Math.round((p.intensityBias || 0) * 100));
   els.swing.value = String(Math.round((p.swing ?? 0) * 100));
@@ -229,12 +232,13 @@ function renderMeta(ms = null, check = null) {
   const s = state.song;
   if (!s) return;
   els.title.textContent = s.title;
-  const bits = [s.key.name, `${s.bpm} BPM`, `${s.bars} bars`, STYLES[s.style]?.name, MOODS[s.mood]?.name];
+  const tempo = s.tempo ? describeTempo(tempoMapOf(s)) : `${s.bpm} BPM`;
+  const bits = [s.key.name, tempo, `${s.bars} bars`, STYLES[s.style]?.name, MOODS[s.mood]?.name];
   els.meta.textContent = bits.join(' · ');
   els.seed.textContent = `#${s.seed.slice(0, 6)}`;
   els.seed.title = `${s.totalNotes} notes${ms != null ? ` · composed in ${ms} ms` : ''}`;
   if (announceNext) {
-    els.live.textContent = `New song: ${s.title}, ${s.key.name}, ${s.bpm} BPM`;
+    els.live.textContent = `New song: ${s.title}, ${s.key.name}, ${s.tempo ? describeTempo(tempoMapOf(s)) : `${s.bpm} BPM`}`;
   }
   if (check && !check.ok) console.warn('theory validation', check.issues);
 }
@@ -246,9 +250,11 @@ function renderSections() {
     d.className = 'sec';
     d.textContent = `${sec.name} ${sec.bars}`;
     d.dataset.bar = String(sec.bar);
-    d.title = `${sec.name} — ${sec.chords.map((c) => c.symbol).join(' ')}`;
+    const secMap = tempoMapOf(state.song);
+    const secBpm = Math.round(secMap.bpmAt(sec.bar * state.song.beatsPerBar));
+    d.title = `${sec.name} — ${secBpm} BPM — ${sec.chords.map((c) => c.symbol).join(' ')}`;
     d.addEventListener('click', () => {
-      const at = (sec.bar * state.song.beatsPerBar * 60) / state.song.bpm;
+      const at = tempoMapOf(state.song).secondsAt(sec.bar * state.song.beatsPerBar);
       if (player?.playing) player.play(at);
       else { ensurePlayer(); player.startPos = at; drawViz(at); }
       if (player?.loop) setLoopFor(sec);
@@ -276,7 +282,8 @@ function renderSummary() {
   });
   els.summary.innerHTML = '';
   const p = document.createElement('p');
-  p.textContent = `${s.title} — ${s.key.name}, ${s.bpm} BPM, ${s.bars} bars, ${s.timeSig[0]}/${s.timeSig[1]}. `
+  const tempoText = s.tempo ? describeTempo(tempoMapOf(s)) : `${s.bpm} BPM`;
+  p.textContent = `${s.title} — ${s.key.name}, ${tempoText}, ${s.bars} bars, ${s.timeSig[0]}/${s.timeSig[1]}. `
     + `${s.totalNotes} notes in total.`;
   const ol = document.createElement('ol');
   for (const line of lines) {
@@ -362,8 +369,11 @@ function currentSection(posSec) {
 
 function setLoopFor(sec) {
   if (!player || !sec || !state.song) return;
-  const spb = 60 / state.song.bpm;
-  player.setLoop(sec.bar * state.song.beatsPerBar * spb, (sec.bar + sec.bars) * state.song.beatsPerBar * spb);
+  const map = tempoMapOf(state.song);
+  player.setLoop(
+    map.secondsAt(sec.bar * state.song.beatsPerBar),
+    map.secondsAt((sec.bar + sec.bars) * state.song.beatsPerBar),
+  );
   syncControls();
 }
 
@@ -611,6 +621,11 @@ function wirePresets() {
     debouncedGenerate();
   });
   els.bpm.addEventListener('change', () => pushHistory());
+  els.tempodrift.addEventListener('input', () => {
+    els.tempodriftout.textContent = `${els.tempodrift.value}%`;
+    setPresets({ tempoDrift: Number(els.tempodrift.value) / 100 });
+    debouncedGenerate();
+  });
   els.timesig.addEventListener('change', () => {
     const [a, b] = els.timesig.value.split('x').map(Number);
     pushHistory();

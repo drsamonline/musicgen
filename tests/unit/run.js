@@ -13,6 +13,7 @@ import { songToMidi } from '../../app/src/export/midi.js';
 import { integratedLufs } from '../../app/src/audio/lufs.js';
 import { encodeState, decodeState } from '../../app/src/export/artwork.js';
 import { safeHarmonicsFor } from '../../app/src/audio/instruments.js';
+import { makeTempoMap, flatTempo, describeTempo } from '../../app/src/core/tempo.js';
 import { zipStore, crc32 } from '../../app/src/export/zip.js';
 
 let pass = 0;
@@ -222,6 +223,41 @@ test('golden seeds are stable', () => {
     'Dash Glow / Toll Road|318|8|C mixolydian',
   ];
   eq(JSON.stringify(hashes), JSON.stringify(snapshot), 'golden seeds drifted');
+});
+
+console.log('\nTempo map');
+test('secondsAt integrates a piecewise tempo', () => {
+  const map = makeTempoMap([{ beat: 0, bpm: 80 }, { beat: 16, bpm: 90 }, { beat: 32, bpm: 84 }]);
+  assert(Math.abs(map.secondsAt(16) - 12) < 1e-9, 'first segment');
+  assert(Math.abs(map.secondsAt(32) - (12 + 16 * 60 / 90)) < 1e-9, 'second segment');
+});
+test('beatAt inverts secondsAt', () => {
+  const map = makeTempoMap([{ beat: 0, bpm: 70 }, { beat: 8, bpm: 120 }, { beat: 24, bpm: 95 }]);
+  for (const beat of [0, 3.5, 8, 15, 24, 40]) {
+    assert(Math.abs(map.beatAt(map.secondsAt(beat)) - beat) < 1e-6, `round trip at ${beat}`);
+  }
+});
+test('a flat tempo matches the old arithmetic', () => {
+  const map = flatTempo(84);
+  assert(Math.abs(map.secondsAt(64) - (64 * 60) / 84) < 1e-9, 'flat integration');
+  eq(describeTempo(map), '84 BPM');
+});
+test('tempo never leaves its declared window', () => {
+  for (const drift of [0, 0.08, 0.2, 0.35]) {
+    const song = compose({ style: 'cinematic', mood: 'epic', theme: 'space', tech: 'analog', bpm: 100, type: 'full', tempoDrift: drift }, `drift-${drift}`);
+    const lo = 100 * (1 - drift) - 0.01;
+    const hi = 100 * (1 + drift) + 0.01;
+    for (const seg of song.tempo.segments) {
+      assert(seg.bpm >= lo && seg.bpm <= hi, `segment ${seg.bpm} outside ${lo}–${hi}`);
+    }
+  }
+});
+test('songs actually vary their tempo', () => {
+  const song = compose({ style: 'lofi', mood: 'dreamy', theme: 'rain', tech: 'analog', bpm: 84, type: 'full', tempoDrift: 0.12 }, 'varies');
+  assert(song.tempo.segments.length > 3, 'only one tempo segment');
+  assert(song.bpmRange[1] - song.bpmRange[0] > 4, `range too narrow: ${song.bpmRange}`);
+  const map = makeTempoMap(song.tempo.segments, { base: 84 });
+  assert(Math.abs(map.secondsAt(song.bars * song.beatsPerBar) - song.durationSec) < 0.01, 'duration disagrees with the map');
 });
 
 console.log('\nAnti-aliasing');

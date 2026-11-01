@@ -8,6 +8,7 @@ import {
 } from './theory.js';
 import { voiceProgression } from './voicing.js';
 import { applyTransform } from './motif.js';
+import { makeTempoMap, DEFAULT_DRIFT } from './tempo.js';
 import { STYLES, STYLE_EXTRAS } from '../presets/styles.js';
 import { MOODS } from '../presets/moods.js';
 import { THEMES } from '../presets/themes.js';
@@ -22,7 +23,7 @@ const TONIC_WEIGHTS = [
 // Bump this whenever the composer's output changes for the same inputs.
 // Seeds and share links carry it so an old link can say "this will sound
 // different now" instead of silently lying.
-export const COMPOSER_VERSION = 4;
+export const COMPOSER_VERSION = 5;
 
 export const BPM_MIN = 20;
 export const BPM_MAX = 500;
@@ -42,6 +43,7 @@ export function normalisePresets(p) {
   if (!TECHS[out.tech]) out.tech = 'analog';
   if (!TYPES[out.type]) out.type = 'full';
   out.bpm = Math.max(BPM_MIN, Math.min(BPM_MAX, Math.round(Number(out.bpm) || 84)));
+  out.tempoDrift = Math.max(0, Math.min(0.35, Number(out.tempoDrift ?? DEFAULT_DRIFT) || 0));
   const ts = Array.isArray(out.timeSig) ? out.timeSig : [4, 4];
   out.timeSig = [Math.max(1, Math.min(12, ts[0] | 0)), ts[1] | 0 || 4];
   return out;
@@ -56,6 +58,46 @@ function chooseKey(rng, mood, presets) {
   const modes = mood.modes;
   const mode = rng.weighted(modes.map((m) => m[0]), modes.map((m) => m[1]));
   return { tonic, mode };
+}
+
+// --------------------------------------------------------------- tempo
+// How much faster or slower each kind of section wants to be, before mood
+// and rubato are applied.
+const SECTION_TEMPO = {
+  intro: -0.06, verse: -0.02, chorus: 0.05, bridge: -0.08,
+  outro: -0.1, loop: 0, break: -0.05, drone: 0, A: 0.02, B: 0.06,
+};
+
+function buildTempo(rng, style, mood, presets, sections, beatsPerBar) {
+  const base = presets.bpm;
+  const drift = Math.max(0, Math.min(0.35, presets.tempoDrift ?? style.tempoDrift ?? DEFAULT_DRIFT));
+  const tension = 1 + Math.max(0, mood.tensionBias || 0) * 0.6;
+  const segs = [{ beat: 0, bpm: base }];
+  let bar = 0;
+
+  sections.forEach((sec, si) => {
+    const factor = 1 + (SECTION_TEMPO[sec.name] ?? 0) * tension;
+    segs.push({ beat: bar * beatsPerBar, bpm: base * factor });
+    // rubato: a small, deterministic nudge every four bars, so a phrase can
+    // lean forward into its climax and ease off at the end
+    for (let b = 4; b < sec.bars; b += 4) {
+      const r = rng.fork(`rubato|${si}|${b}`).float() - 0.5;
+      segs.push({ beat: (bar + b) * beatsPerBar, bpm: base * factor * (1 + r * drift * 0.8) });
+    }
+    bar += sec.bars;
+  });
+
+  // ritardando: the last two bars ease off, which is what makes an ending
+  // sound like an ending rather than a stop
+  if (bar >= 2) {
+    segs.push({ beat: (bar - 2) * beatsPerBar, bpm: base * (1 - drift * 0.45) });
+    segs.push({ beat: (bar - 1) * beatsPerBar, bpm: base * (1 - drift * 0.8) });
+  }
+
+  const lo = base * (1 - drift);
+  const hi = base * (1 + drift);
+  const clamped = segs.map((s) => ({ beat: s.beat, bpm: Math.max(lo, Math.min(hi, s.bpm)) }));
+  return makeTempoMap(clamped, { base, drift });
 }
 
 // --------------------------------------------------------------- structure
@@ -714,7 +756,8 @@ export function compose(rawPresets, seed) {
 
   const totalBars = barCursor;
   const totalBeats = totalBars * beatsPerBar;
-  const durationSec = (totalBeats / presets.bpm) * 60;
+  const tempoMap = buildTempo(rng.fork('tempo'), style, mood, presets, sections, beatsPerBar);
+  const durationSec = tempoMap.secondsAt(totalBeats);
 
   const fx = {
     reverb: clamp01((style.fx.reverb ?? 0.3) + (theme.fxBias?.reverb ?? 0)),
@@ -730,6 +773,14 @@ export function compose(rawPresets, seed) {
     title: makeTitle(rng.fork('title'), theme),
     key: { tonic, mode, name: `${['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'][tonic]} ${mode}` },
     bpm: presets.bpm,
+    bpmRange: [tempoMap.min, tempoMap.max],
+    tempo: {
+      base: presets.bpm,
+      drift: tempoMap.drift,
+      segments: tempoMap.segments,
+      min: tempoMap.min,
+      max: tempoMap.max,
+    },
     timeSig: presets.timeSig,
     beatsPerBar,
     bars: totalBars,

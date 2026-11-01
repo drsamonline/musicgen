@@ -25,6 +25,7 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 | 1.13 | `[x]` Chord rhythm variation (anticipations, pushes) | S | H | Right now chords always land on the bar line. |
 | 1.14 | `[x]` Intro/outro generators that fade the arrangement rather than the volume | M | M | Currently an outro is just a quiet section. |
 | 1.15 | `[x]` Golden-seed listening log with notes | S | H | A file of "seed → what's wrong with it" is worth more than another feature. |
+| 1.17 | `[x]` Variable tempo (tempo map, rubato, ritardando) | M | H | A song is a list of tempo segments; sections lift or settle, phrases get deterministic rubato, the last two bars ease off. Everything that converts beats to seconds goes through `secondsAt()`. |
 | 1.16 | `[x]` Tempo range 20–500 BPM | S | H | Was 40–200. Delay line, drum subdivision, swing and scheduler all had to survive 20 and 500; both are in the test suite now. |
 
 ## 2. Synthesis & sound design
@@ -174,6 +175,12 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 5. **Do we want a composer version pin in the UI?** If the algorithm changes, every existing seed changes with it — that is a user-visible break worth surfacing.
 
 ---
+
+## What v2.5.0 closed
+
+**Tempo is now a map, not a number.** `src/core/tempo.js` holds a piecewise tempo map with `secondsAt()` / `beatAt()` / `bpmAt()`; the composer writes sections and phrases into it and the engine reads every conversion from it — note times, note lengths, automation, loop points, section jumps and the render length. A song therefore lifts into the chorus, settles in the verse, gets deterministic rubato per phrase and eases off over its last two bars. The BPM dial is the centre, *Tempo drift* is how far it may wander.
+
+The scheduler and the tests were the interesting part: an event's `sec` is now `map.secondsAt(beat)`, and the suite asserts that every scheduled event matches the map to the microsecond, that the render length equals the song duration, and that sections really do sit at different tempos.
 
 ## What v2.4.0 closed
 
