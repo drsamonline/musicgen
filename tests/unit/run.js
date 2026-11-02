@@ -273,6 +273,23 @@ test('garbage is rejected, not crashed on', () => {
   assert(threw, 'a non-MIDI buffer should throw');
 });
 
+console.log('\nTextures and transitions');
+test('ambient beds carry a texture, not a pitch', () => {
+  const song = compose({ style: 'ambient', mood: 'calm', theme: 'ocean', tech: 'noise', bpm: 60, type: 'drone' }, 'tex');
+  assert(song.tracks.bed.length > 0, 'no bed');
+  for (const n of song.tracks.bed) assert(typeof n.texture === 'string' && n.texture.length, 'bed note without a texture');
+});
+test('transitions only appear where the arrangement lifts', () => {
+  const calm = compose({ style: 'ambient', mood: 'calm', theme: 'ocean', tech: 'noise', bpm: 60, type: 'drone' }, 'calm');
+  const epic = compose({ style: 'cinematic', mood: 'epic', theme: 'space', tech: 'analog', bpm: 70, type: 'full' }, 'epic');
+  eq(calm.transitions.length, 0);
+  assert(epic.transitions.length > 0, 'a building song should have transitions');
+  for (const tr of epic.transitions) {
+    assert(tr.kind === 'riser' || tr.kind === 'impact', `bad kind ${tr.kind}`);
+    assert(tr.beat >= 0, 'negative beat');
+  }
+});
+
 console.log('\nTempo map');
 test('secondsAt integrates a piecewise tempo', () => {
   const map = makeTempoMap([{ beat: 0, bpm: 80 }, { beat: 16, bpm: 90 }, { beat: 32, bpm: 84 }]);

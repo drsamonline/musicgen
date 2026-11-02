@@ -50,6 +50,8 @@ Then use your browser's **Install** / **Add to Home Screen** (iOS: Share → Add
 
 **The presets** — 11 styles, 10 moods, 10 themes, 8 song types, 7 synthesis technologies, plus a compatibility table that maps styles to allowed moods and engines. Tempo is a **map, not a number**: choruses lift, verses settle, every phrase gets a little rubato and the last two bars ease off, so a song breathes instead of clicking along. The BPM dial sets the centre and *Tempo drift* sets how far it may wander (0–35%). Range: **20–500 BPM**; per-track locks freeze the drums or the melody while you reroll everything else. Every share link carries the composer version, so an old seed can tell you it will sound different instead of silently lying.
 
+**The ambience** — eight synthesised textures (rain, wind, fire, vinyl, crickets, ocean, stream, hum) chosen by theme and style, sitting under the arrangement with slow LFO movement and sparse droplets/crackles. Plus section transitions: a noise riser into every lift and a soft impact on the downbeat.
+
 **The synthesis** — subtractive, FM, chiptune (real `PeriodicWave` pulses), additive, a six-frame **wavetable with a real morph**, Karplus-Strong, a **formant/vowel** layer and noise instruments, plus two **AudioWorklet** engines (granular and a waveguide) with native fallbacks; a drum kit built from oscillators and filtered noise; generated convolution reverb, tempo-synced delay and chorus; glue compressor and limiter on the master, mono bass below 120 Hz, sidechain ducking for EDM, a filter envelope and velocity-to-timbre on every voice, analogue drift, and a stereo-width tap. A voice pool steals the quietest voice with a fade; the scheduler runs a 200 ms lookahead and skips late notes instead of firing them in a burst.
 
 **MIDI both ways** — export the song as Type-1 MIDI, or **import a MIDI file as the theme**: the highest-register line becomes the song's idea and everything derives from it.
@@ -74,7 +76,7 @@ npm run audit
 ## Tests
 
 ```bash
-npm test              # 42 unit tests, no browser needed
+npm test              # 44 unit tests, no browser needed
 npm run test:browser  # 96 tests in real Chromium with real Web Audio
 npm run lint          # determinism lint: no Math.random / Date.now in pure modules
 npm run budget        # shell size, precache completeness, no external requests
@@ -133,6 +135,10 @@ tests/unit/ tests/browser/
 scripts/              screenshots.mjs, audit.mjs
 docs/ENHANCEMENTS.md  the backlog
 ```
+
+## Credits and licences
+
+Two of my own other repositories informed this one. **ambient-sound-studio** (personal-use licence) is where the idea of layered synthesised textures comes from — the eight beds here are reimplemented for this engine, not copied. **eon-commando** (same) contributed the noise-sweep primitive that became the section risers. **audio-kit** (PolyForm Noncommercial) shares the same "patterns, not files" philosophy; its code is deliberately *not* vendored here, because MusicGen is MIT and mixing licences in one bundle is a trap.
 
 ## Layout
 

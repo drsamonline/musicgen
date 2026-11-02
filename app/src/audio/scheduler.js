@@ -4,6 +4,7 @@ import { synthVoice, isOffline } from './instruments.js';
 import { drumVoice } from './drums.js';
 import { freqOf, pc } from '../core/theory.js';
 import { TECHS } from '../presets/techs.js';
+import { textureVoice } from './textures.js';
 import { makeTempoMap, DEFAULT_DRIFT } from '../core/tempo.js';
 import { TRACK_NAMES, applyVariant } from './graph.js';
 
@@ -106,6 +107,7 @@ export function applyAutomation(graph, song, t0 = 0, fromSec = 0) {
 
 export function makeScheduler(graph, song) {
   const map = tempoMapOf(song);
+  graph.__tempoMap = map;
   const durOf = (n) => Math.max(0.03, map.secondsAt(n.t + n.d) - map.secondsAt(n.t));
   const intensityAt = sectionIntensity(song);
   const tech = graph.tech;
@@ -122,6 +124,20 @@ export function makeScheduler(graph, song) {
   return function scheduleEvent(ev, when) {
     const { track, n } = ev;
     const brightness = 0.55 + intensityAt(n.t) * 0.7;
+
+    // ambient beds are textures, not pitched voices
+    if (track === 'bed' && n.texture) {
+      try {
+        textureVoice(graph.ctx, graph.tracks.bed.input, {
+          when,
+          dur: durOf(n),
+          kind: n.texture,
+          level: Math.min(1, n.v * 2),
+          seed: Math.round(n.t * 31 + n.texture.length),
+        });
+        return;
+      } catch { /* fall through to the noise voice */ }
+    }
 
     // worklet voices take whole notes as messages
     const wnode = graph.tracks[track]?.worklet;

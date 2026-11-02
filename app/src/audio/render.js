@@ -3,6 +3,7 @@
 import { buildGraph } from './graph.js';
 import { buildEvents, makeScheduler, applyAutomation } from './scheduler.js';
 import { prepareWorklets } from './worklets.js';
+import { scheduleTransitions } from './transitions.js';
 
 // ---------------------------------------------------------------- offline
 export async function renderSong(song, { sampleRate = 44100, tailSec = 2, onProgress = null, only = null } = {}) {
@@ -15,6 +16,7 @@ export async function renderSong(song, { sampleRate = 44100, tailSec = 2, onProg
   const graph = buildGraph(ctx, song);
   applyAutomation(graph, song, 0, 0);
   const schedule = makeScheduler(graph, song);
+  scheduleTransitions(graph, song, 0, 0);
   const events = buildEvents(song, only);
   for (let i = 0; i < events.length; i++) {
     try { schedule(events[i], Math.max(0, events[i].sec)); } catch { graph.cap.dropped++; }
@@ -25,6 +27,16 @@ export async function renderSong(song, { sampleRate = 44100, tailSec = 2, onProg
       await new Promise((r) => setTimeout(r, 0));
     }
   }
+  // Fade the master out over the last 140 ms: a file that ends on a non-zero
+  // sample is the click you hear as a glitch at the end of the song.
+  try {
+    const g = graph.master.gain;
+    const fadeAt = Math.max(0.05, Math.min(lengthSec - 0.02, song.durationSec - 0.14));
+    g.setValueAtTime(g.value, fadeAt);
+    g.linearRampToValueAtTime(0.0001, Math.min(lengthSec, fadeAt + 0.14));
+    g.setValueAtTime(0, Math.max(0, Math.min(lengthSec - 0.0005, fadeAt + 0.145)));
+  } catch { /* best effort */ }
+
   if (onProgress) onProgress(0.5);
   const buf = await ctx.startRendering();
   if (onProgress) onProgress(1);

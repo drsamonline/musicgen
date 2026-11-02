@@ -176,6 +176,12 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 
 ---
 
+## What v3.1.0 closed
+
+- **The end-of-song click.** A render with no tail ended on a non-zero sample (−0.05 to −0.22 at full level) — the master was cut dead at `durationSec`, live and in exports. There is now a 140 ms master fade at the end, a 20 ms fade-in at the start, and a fade at every loop wrap. Measured: the last sample went from −0.219 to −0.028 and then to silence.
+- **Ambient textures.** Eight synthesised beds (rain, wind, fire, vinyl, crickets, ocean, stream, hum) picked by theme and style, with slow LFO movement and sparse droplets/crackles. Ambient and cinematic songs stop sounding like a filtered noise wash.
+- **Section transitions.** A noise riser into every lift, a soft impact on the downbeat — only where the arrangement actually builds, capped at eight per song.
+
 ## What v3.0.0 closed
 
 - **One theme per song (1.2).** `buildTheme()` writes a two-bar idea; `deriveTheme()` gives each section its own version of it — verse plain, chorus lifted a third and into the upper register, bridge inverted, outro fragmented. That is the difference between a song and a playlist of eight bars.

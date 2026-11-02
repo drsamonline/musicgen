@@ -2,6 +2,10 @@
 
 Generated from the commit history by `npm run changelog`.
 
+## 2026-11-02
+
+- feat: one theme per song, MIDI import, engine split into modules (v3.0.0) (`321ba91`)
+
 ## 2026-11-01
 
 - feat: variable tempo - a song breathes instead of clicking (v2.5.0) (`662e421`)

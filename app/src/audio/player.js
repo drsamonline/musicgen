@@ -2,6 +2,7 @@
 // watchdog and worklet clock.
 import { buildGraph, voiceCap } from './graph.js';
 import { buildEvents, makeScheduler, applyAutomation } from './scheduler.js';
+import { scheduleTransitions } from './transitions.js';
 import { prepareWorklets } from './worklets.js';
 
 // ---------------------------------------------------------------- live player
@@ -66,6 +67,8 @@ export class Player {
     if (this.idx < 0) this.idx = this.events.length;
     this.playing = true;
     applyAutomation(this.graph, this.song, this.startCtxTime, this.startPos);
+    scheduleTransitions(this.graph, this.song, this.startCtxTime, this.startPos);
+    this.scheduleEdges();
     if (this.clockNode) {
       try { this.clockNode.port.postMessage({ type: 'start' }); } catch { /* noop */ }
     } else {
@@ -77,6 +80,35 @@ export class Player {
 
   setLoop(startSec, endSec) {
     this.loop = startSec == null ? null : { start: startSec, end: endSec };
+  }
+
+  // A song that stops on a non-zero sample clicks. Fade the master over the
+  // last 140 ms (and again at every loop wrap), and fade in at the start.
+  scheduleEdges() {
+    const g = this.graph.master.gain;
+    const base = (this.userVolume ?? 0.9) * 0.32;
+    const now = this.ctx.currentTime;
+    try {
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(0.0001, now);
+      g.linearRampToValueAtTime(base, now + 0.02);
+
+      const end = this.song.durationSec;
+      const fadeStart = this.startCtxTime + Math.max(0, end - this.startPos) - 0.14;
+      if (fadeStart > now + 0.05) {
+        g.setValueAtTime(base, fadeStart);
+        g.linearRampToValueAtTime(0.0001, fadeStart + 0.14);
+      }
+      if (this.loop) {
+        const loopEnd = this.startCtxTime + (this.loop.end - this.startPos) - 0.12;
+        const loopStart = this.startCtxTime + (this.loop.start - this.startPos) + 0.02;
+        if (loopEnd > now + 0.05) {
+          g.setValueAtTime(base, loopEnd);
+          g.linearRampToValueAtTime(0.0001, loopEnd + 0.1);
+          g.setValueAtTime(base, Math.max(loopEnd + 0.11, loopStart));
+        }
+      }
+    } catch { /* automation is best-effort */ }
   }
 
   // If the timer is throttled (background tab, busy thread) the song would

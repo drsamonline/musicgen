@@ -813,6 +813,7 @@ export function compose(rawPresets, seed) {
         d: sec.bars * beatsPerBar,
         p: 48 + sTonic,
         v: level * (style.texture ?? 0.5),
+        texture: textureFor(presets.theme, style, rng.fork('tex' + si)),
       });
     }
     if (presets.arp && allowed.includes('chords')) {
@@ -890,12 +891,53 @@ export function compose(rawPresets, seed) {
     monoBass: !!style.monoBass,
     sidechain: !!style.sidechain,
     theme: songTheme,
+    transitions: collectTransitions(songSections, style, mood, tempoMap, beatsPerBar),
     width: style.width ?? 0.4,
     variant: presets.variant ?? rng.fork('variant').int(3),
     tuning: presets.microtuning ? { cents: justIntonationCents(tonic, mode) } : null,
     palette: theme.palette,
     totalNotes: Object.values(tracks).reduce((a, t) => a + t.length, 0),
   };
+}
+
+// Which ambience sits under a section: the theme says what the song is about,
+// the style says what it sounds like.
+const THEME_TEXTURE = {
+  rain: ['rain', 'rain', 'vinyl'],
+  ocean: ['ocean', 'wind', 'stream'],
+  space: ['wind', 'hum', 'ocean'],
+  forest: ['crickets', 'stream', 'wind'],
+  desert: ['wind', 'hum'],
+  cyberpunk: ['hum', 'vinyl', 'rain'],
+  nightdrive: ['vinyl', 'hum'],
+  festival: ['wind', 'rain'],
+  winter: ['wind', 'wind', 'hum'],
+  fire: ['fire', 'fire', 'crickets'],
+};
+
+// A riser into a lift, an impact on the downbeat: only where the arrangement
+// actually builds, and never more than a few per song.
+export function collectTransitions(sections, style, mood, tempoMap, beatsPerBar) {
+  const out = [];
+  const strength = (style.modulation ?? 0.15) + (mood.tensionBias ?? 0);
+  if (strength < 0.2) return out;
+  sections.forEach((sec, i) => {
+    if (i === 0) return;
+    const prev = sections[i - 1];
+    const lift = (sec.intensity ?? 0.5) - (prev.intensity ?? 0.5);
+    if (lift <= 0.05) return;
+    const beat = sec.bar * beatsPerBar;
+    const gain = Math.min(1, 0.5 + lift);
+    out.push({ beat, kind: 'riser', gain });
+    out.push({ beat, kind: 'impact', gain: gain * 0.8 });
+  });
+  return out.slice(0, 8);
+}
+
+export function textureFor(themeId, style, rng) {
+  const options = THEME_TEXTURE[themeId] || ['rain', 'wind', 'vinyl'];
+  if (style?.texture && style.texture > 0.6) return options[rng.int(options.length)];
+  return options[0];
 }
 
 function clamp01(x) { return Math.max(0, Math.min(1, x)); }
