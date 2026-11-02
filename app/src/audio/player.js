@@ -38,11 +38,19 @@ export class Player {
     // is busy, and a jittery scheduler is an audible scheduler.
     if (this.worklets?.clock) {
       try {
+        // A worklet node with zero outputs is never pulled by the graph, and
+        // `numberOfOutputs: 0` is rejected outright — so give it one output and
+        // a silent sink. This is what makes the scheduler immune to main-thread
+        // jank: ticks come from the audio thread.
         this.clockNode = new AudioWorkletNode(this.ctx, 'clock-tick', {
           numberOfInputs: 0,
-          numberOfOutputs: 0,
+          numberOfOutputs: 1,
+          outputChannelCount: [1],
           processorOptions: { frames: 1024 },
         });
+        const sink = this.ctx.createGain();
+        sink.gain.value = 0;
+        this.clockNode.connect(sink).connect(this.ctx.destination);
         this.clockNode.port.onmessage = () => { if (this.playing) this.tick(); };
       } catch { this.clockNode = null; }
     }

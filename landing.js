@@ -42,17 +42,22 @@ function fit() {
   return { dpr, w: canvas.width, h: canvas.height };
 }
 
-function draw(posSec = 0) {
-  const { dpr, w, h } = fit();
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, w, h);
-  if (!song) return;
+// Static layer: everything in the specimen that does not move is rendered
+// once per song and blitted; only the playhead is drawn per frame.
+const staticLayer = { key: null, canvas: null };
 
-  const spb = 60 / song.bpm;
+function renderStatic(w, h, dpr) {
+  const key = `${song.seed}|${w}|${h}|${dpr}`;
+  if (staticLayer.key === key && staticLayer.canvas) return staticLayer.canvas;
+  const off = staticLayer.canvas && staticLayer.canvas.width === w && staticLayer.canvas.height === h
+    ? staticLayer.canvas
+    : (staticLayer.canvas = Object.assign(document.createElement('canvas'), { width: w, height: h }));
+  const ctx = off.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+
   const total = song.bars * song.beatsPerBar;
   const xOf = (beat) => (beat / total) * w;
 
-  // section bands + bar lines
   for (const sec of song.sections) {
     const x0 = xOf(sec.bar * song.beatsPerBar);
     const x1 = xOf((sec.bar + sec.bars) * song.beatsPerBar);
@@ -85,7 +90,6 @@ function draw(posSec = 0) {
   }
   ctx.globalAlpha = 1;
 
-  // drum lane
   const drumTop = h - 20 * dpr;
   for (const n of song.tracks.drums || []) {
     const x = xOf(n.t);
@@ -94,8 +98,21 @@ function draw(posSec = 0) {
     ctx.fillRect(x, drumTop - size * dpr * 0.5, Math.max(1.2 * dpr, size * dpr * 0.4), size * dpr);
   }
 
-  // playhead
-  const beat = posSec / spb;
+  staticLayer.key = key;
+  return off;
+}
+
+function draw(posSec = 0) {
+  const { dpr, w, h } = fit();
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+  if (!song) return;
+
+  ctx.drawImage(renderStatic(w, h, dpr), 0, 0);
+
+  const total = song.bars * song.beatsPerBar;
+  const xOf = (beat) => (beat / total) * w;
+  const beat = posSec / (60 / song.bpm);
   const px = xOf(Math.min(total, beat));
   ctx.strokeStyle = '#c6f24e';
   ctx.lineWidth = 1.6 * dpr;

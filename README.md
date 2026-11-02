@@ -107,6 +107,14 @@ The suite asserts, rather than claims:
 
 Per-track loudness is measured, not eyeballed: the drum bus has its own compressor, every track has a measured trim, and `npm run test:browser` renders each track solo and fails if anything is buried more than 18 dB or if the bass sits more than 12 dB over the drums. That test exists because the bass *did* sit 18 dB over the drums in v2.2.0, and it was the difference between "a song" and "a bass solo".
 
+## Performance: why it stopped stuttering
+
+Three things were fighting for the main thread, and the fix was structural rather than tuning:
+
+- **The scheduler now runs off the audio thread.** The clock worklet had never actually attached — `AudioWorkletNode` rejects `numberOfOutputs: 0`, so the constructor threw and the app silently fell back to `setInterval`, which stutters whenever the main thread is busy. It now has one output and a silent sink, and ticks arrive from the audio thread. Lookahead went from 200 ms to 300 ms, and a note is only dropped if it is more than 150 ms late.
+- **The visualisers are two layers.** Everything static in the piano roll (grid, chord labels, ~1,500 notes, drum lane) is rendered once into an offscreen canvas and blitted; only the section band and the playhead are drawn per frame. Measured cost of one visualiser frame: **0.08 ms**, down from several milliseconds. The landing page's specimen got the same treatment.
+- **30 fps, not 60.** The render loop was already capped; with the blit it now has room to spare, and `prefers-reduced-motion` drops it to 10 fps.
+
 ## Performance and audio integrity
 
 Measured, not guessed. The reverb IR is synthesised once per context and cached (it used to be rebuilt on every pause); the saturation curve is a shared `Float32Array` instead of 1024 floats per note; analyser buffers are reused across frames; the section-intensity lookup is a binary search; and pausing fades the master instead of rebuilding the graph.

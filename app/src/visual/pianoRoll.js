@@ -72,6 +72,21 @@ function analyserBuffer(analyser, kind) {
 const DRUM_LANE = { kick: 0.9, snare: 0.7, hat: 0.5, clap: 0.65, tom: 0.6, rim: 0.45, shaker: 0.35 };
 
 // ---------------------------------------------------------------- piano roll
+// The roll is drawn in two layers: everything that does not move (grid,
+// labels, notes, drum lane) is rendered once into an offscreen canvas and
+// blitted, and only the section band and playhead are drawn per frame. At
+// 30 fps over a 1,500-note song that is the difference between "smooth" and
+// "stutters on a phone".
+const staticCache = { key: null, canvas: null };
+
+function cacheKey(song, view, w, h, dpr, pal) {
+  return [
+    song.seed, song.composerVersion, song.bars, song.beatsPerBar, song.bpm,
+    view ? `${view.start.toFixed(2)}:${view.span.toFixed(2)}` : 'auto',
+    w, h, dpr, pal.bg, pal.lead,
+  ].join('|');
+}
+
 export function drawPianoRoll(canvas, song, positionSec = 0, view = null) {
   const { w, h, dpr } = fitCanvas(canvas);
   const ctx = canvas.getContext('2d');
@@ -80,6 +95,7 @@ export function drawPianoRoll(canvas, song, positionSec = 0, view = null) {
   if (!song) return;
 
   const totalBeats = song.bars * song.beatsPerBar;
+  const map = song.tempo?.segments ? null : null;
   const spb = 60 / song.bpm;
   const posBeat = positionSec / spb;
   const viewBeats = Math.max(4, Math.min(totalBeats, view?.span ?? 32));
@@ -89,87 +105,102 @@ export function drawPianoRoll(canvas, song, positionSec = 0, view = null) {
   const xOf = (beat) => ((beat - startBeat) / viewBeats) * w;
 
   const mel = ['lead', 'chords', 'bass', 'pad', 'arp'];
-  const pitches = [];
-  for (const t of mel) for (const n of song.tracks[t] || []) pitches.push(n.p);
-  let lo = 36, hi = 88;
-  if (pitches.length) {
-    pitches.sort((a, b) => a - b);
-    lo = Math.max(21, pitches[Math.floor(pitches.length * 0.02)] - 2);
-    hi = Math.min(108, pitches[Math.floor(pitches.length * 0.98)] + 2);
-  }
-  const laneTop = 8 * dpr;
-  const laneH = h - 26 * dpr;
-  const yOf = (p) => laneTop + laneH - ((p - lo) / Math.max(1, hi - lo)) * laneH;
+  const key = cacheKey(song, view, w, h, dpr, pal);
 
-  // section band behind everything
+  if (staticCache.key !== key || !staticCache.canvas) {
+    const off = staticCache.canvas && staticCache.canvas.width === w && staticCache.canvas.height === h
+      ? staticCache.canvas
+      : (staticCache.canvas = Object.assign(document.createElement('canvas'), { width: w, height: h }));
+    const g = off.getContext('2d');
+    g.clearRect(0, 0, w, h);
+
+    const pitches = [];
+    for (const t of mel) for (const n of song.tracks[t] || []) pitches.push(n.p);
+    let lo = 36;
+    let hi = 88;
+    if (pitches.length) {
+      pitches.sort((a, b) => a - b);
+      lo = Math.max(21, pitches[Math.floor(pitches.length * 0.02)] - 2);
+      hi = Math.min(108, pitches[Math.floor(pitches.length * 0.98)] + 2);
+    }
+    const laneTop = 8 * dpr;
+    const laneH = h - 26 * dpr;
+    const yOf = (p) => laneTop + laneH - ((p - lo) / Math.max(1, hi - lo)) * laneH;
+    const noteH = Math.max(2 * dpr, laneH / Math.max(8, hi - lo));
+
+    // bar lines
+    g.strokeStyle = pal.grid;
+    g.lineWidth = 1;
+    for (let b = Math.ceil(startBeat / song.beatsPerBar) * song.beatsPerBar; b < startBeat + viewBeats; b += song.beatsPerBar) {
+      g.beginPath();
+      g.moveTo(xOf(b), 0);
+      g.lineTo(xOf(b), h - 22 * dpr);
+      g.stroke();
+    }
+
+    // chord labels
+    g.fillStyle = pal.label;
+    g.font = `${9 * dpr}px ui-monospace, monospace`;
+    for (const s of song.sections) {
+      for (const ch of s.chords) {
+        const x = xOf(ch.bar * song.beatsPerBar);
+        if (x > w - 200 * dpr) continue; // keep clear of the mode pills
+        if (x > -40 && x < w) g.fillText(ch.symbol, x + 2 * dpr, 10 * dpr);
+      }
+    }
+
+    // notes
+    for (const track of mel) {
+      const notes = song.tracks[track] || [];
+      g.fillStyle = pal[track] || pal.lead;
+      g.globalAlpha = track === 'pad' ? 0.38 : 0.88;
+      for (const n of notes) {
+        if (n.t + n.d < startBeat || n.t > startBeat + viewBeats) continue;
+        const wid = Math.max(1.5 * dpr, (n.d / viewBeats) * w);
+        g.fillRect(xOf(n.t), yOf(n.p), wid, noteH);
+      }
+    }
+    g.globalAlpha = 1;
+
+    // drum lane
+    const drumTop = h - 22 * dpr;
+    for (const n of song.tracks.drums || []) {
+      if (n.t + n.d < startBeat || n.t > startBeat + viewBeats) continue;
+      const lvl = DRUM_LANE[n.drum] ?? 0.4;
+      g.fillStyle = pal.drums;
+      g.globalAlpha = 0.35 + lvl * 0.6;
+      const bh = 20 * dpr * lvl;
+      g.fillRect(xOf(n.t), drumTop + (20 * dpr - bh), Math.max(1.5 * dpr, 2 * dpr), bh);
+    }
+    g.globalAlpha = 1;
+
+    staticCache.key = key;
+  }
+
+  // per frame: the section band, the blit, the playhead
   const sec = song.sections.find((s) => posBeat >= s.bar * song.beatsPerBar && posBeat < (s.bar + s.bars) * song.beatsPerBar);
   if (sec) {
     const x0 = Math.max(0, xOf(sec.bar * song.beatsPerBar));
     const x1 = Math.min(w, xOf((sec.bar + sec.bars) * song.beatsPerBar));
-    ctx.fillStyle = pal.band;
-    ctx.fillRect(x0, 0, Math.max(0, x1 - x0), h);
+    if (x1 > x0) {
+      ctx.fillStyle = pal.band;
+      ctx.fillRect(x0, 0, x1 - x0, h);
+    }
   }
 
-  // bar lines
-  ctx.strokeStyle = pal.grid;
-  ctx.lineWidth = 1;
-  for (let b = Math.ceil(startBeat / song.beatsPerBar) * song.beatsPerBar; b < startBeat + viewBeats; b += song.beatsPerBar) {
+  ctx.drawImage(staticCache.canvas, 0, 0);
+
+  const px = xOf(posBeat);
+  if (px >= 0 && px <= w) {
+    ctx.strokeStyle = pal.playhead;
+    ctx.lineWidth = 1.5 * dpr;
     ctx.beginPath();
-    ctx.moveTo(xOf(b), 0);
-    ctx.lineTo(xOf(b), h - 22 * dpr);
+    ctx.moveTo(px, 0);
+    ctx.lineTo(px, h);
     ctx.stroke();
   }
-
-  // chord labels
-  ctx.fillStyle = pal.label;
-  ctx.font = `${9 * dpr}px ui-monospace, monospace`;
-  for (const s of song.sections) {
-    for (const ch of s.chords) {
-      const x = xOf(ch.bar * song.beatsPerBar);
-      // keep clear of the visualiser-mode pills in the top-right corner
-      if (x > w - 200 * dpr) continue;
-      if (x > -40 && x < w) ctx.fillText(ch.symbol, x + 2 * dpr, 10 * dpr);
-    }
-  }
-
-  // notes
-  for (const track of mel) {
-    const notes = song.tracks[track] || [];
-    ctx.fillStyle = pal[track] || pal.lead;
-    for (const n of notes) {
-      if (n.t + n.d < startBeat || n.t > startBeat + viewBeats) continue;
-      const x = xOf(n.t);
-      const wid = Math.max(1.5 * dpr, (n.d / viewBeats) * w);
-      const nh = Math.max(2 * dpr, laneH / Math.max(8, hi - lo));
-      ctx.globalAlpha = track === 'pad' ? 0.38 : 0.88;
-      ctx.fillRect(x, yOf(n.p), wid, nh);
-    }
-  }
-  ctx.globalAlpha = 1;
-
-  // drum lane
-  const drumTop = h - 22 * dpr;
-  for (const n of song.tracks.drums || []) {
-    if (n.t + n.d < startBeat || n.t > startBeat + viewBeats) continue;
-    const lvl = DRUM_LANE[n.drum] ?? 0.4;
-    ctx.fillStyle = pal.drums;
-    ctx.globalAlpha = 0.35 + lvl * 0.6;
-    const bh = 20 * dpr * lvl;
-    ctx.fillRect(xOf(n.t), drumTop + (20 * dpr - bh), Math.max(1.5 * dpr, 2 * dpr), bh);
-  }
-  ctx.globalAlpha = 1;
-
-  // playhead
-  const px = xOf(posBeat);
-  ctx.strokeStyle = pal.playhead;
-  ctx.lineWidth = 1.5 * dpr;
-  ctx.beginPath();
-  ctx.moveTo(px, 0);
-  ctx.lineTo(px, h);
-  ctx.stroke();
 }
 
-// ---------------------------------------------------------------- bars
 export function drawBars(canvas, analyser) {
   const { w, h, dpr } = fitCanvas(canvas);
   const ctx = canvas.getContext('2d');
@@ -303,6 +334,7 @@ export function beatAtX(canvas, song, x, view = null) {
 }
 
 
+// Which note is under a pointer, using the same layout as drawPianoRoll.
 // Which note is under a pointer, using the same layout as drawPianoRoll.
 export function noteAt(canvas, song, clientX, clientY, view = null) {
   if (!song) return null;

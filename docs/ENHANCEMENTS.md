@@ -176,6 +176,12 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 
 ---
 
+## What v4.1.0 closed
+
+- **The stutter.** The clock worklet had never attached (`numberOfOutputs: 0` throws), so scheduling ran on `setInterval` — the one thing guaranteed to wobble when the main thread is busy. It now has an output and a silent sink; ticks come from the audio thread. Lookahead 300 ms, late-drop threshold 150 ms.
+- **The visualisers.** Static layer cached to an offscreen canvas, per-frame cost measured at **0.08 ms**; same treatment on the landing specimen. This is what made the demo feel heavy on a phone.
+- **A design pass.** New spacing scale, 44 px touch targets, a larger primary action, the canvas as a bordered panel, pill section chips, tabular numerals in the readouts, softer sheet/dialog corners, a stronger focus ring, and the toast moved above the action bar instead of on top of it.
+
 ## What v4.0.0 closed
 
 - **The UI split.** `main.js` was 1,357 lines doing seven jobs; it is now 205 lines of wiring over six `ui/` modules. The split found four real bugs on the way (`view` spread into an object literal, three missing cross-module imports) — which is the argument for splitting, not the tidiness.
