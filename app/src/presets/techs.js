@@ -9,6 +9,19 @@ const base = {
 };
 
 export const TECHS = {
+  // No character at all: sines and a gentle filter, so the notes are the
+  // only thing you hear.
+  none: {
+    id: 'none', name: 'None (clean)',
+    instruments: {
+      bass: { ...base, engine: 'subtractive', wave: 'sine', attack: 0.01, decay: 0.2, sustain: 0.7, release: 0.25, cutoff: 900, q: 0.7, detune: 0, sat: 0, gain: 0.5 },
+      lead: { ...base, engine: 'subtractive', wave: 'sine', attack: 0.012, decay: 0.25, sustain: 0.6, release: 0.35, cutoff: 3200, q: 0.7, detune: 0, sat: 0, gain: 0.34 },
+      chords: { ...base, engine: 'subtractive', wave: 'sine', attack: 0.05, decay: 0.4, sustain: 0.6, release: 0.6, cutoff: 2200, q: 0.7, detune: 0, sat: 0, gain: 0.24 },
+      pad: { ...base, engine: 'subtractive', wave: 'sine', attack: 0.8, decay: 1, sustain: 0.7, release: 1.6, cutoff: 1600, q: 0.6, detune: 0, sat: 0, gain: 0.2 },
+      arp: { ...base, engine: 'subtractive', wave: 'sine', attack: 0.008, decay: 0.14, sustain: 0.4, release: 0.2, cutoff: 3000, q: 0.7, detune: 0, sat: 0, gain: 0.24 },
+    },
+    drums: { engine: 'analog' },
+  },
   analog: {
     id: 'analog', name: 'Analog',
     instruments: {
@@ -81,4 +94,4 @@ export const TECHS = {
   },
 };
 
-export const TECH_IDS = Object.keys(TECHS);
+export const TECH_IDS = Object.keys(TECHS).filter((id) => id !== 'none');

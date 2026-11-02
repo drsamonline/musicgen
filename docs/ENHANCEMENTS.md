@@ -176,6 +176,11 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 
 ---
 
+## What v4.2.0 closed
+
+- **"None" on every dial.** Style, mood, theme, technology and type each have a plain option that still composes something real: no genre baggage (a plain four-on-the-floor and one progression), no emotional bias, no theme (no ambience, neutral palette, plain titles), clean sine tones, and a single continuous section. Random never picks them — they are a deliberate choice, not a surprise.
+- **An Ambience dial of its own.** The texture used to be implied by the theme, which meant "I don't want rain" was not expressible. It is now a first-class control: *Auto (from theme)*, *None (silent)*, or one of the eight beds. Tested at the composer level and through the UI.
+
 ## What v4.1.0 closed
 
 - **The stutter.** The clock worklet had never attached (`numberOfOutputs: 0` throws), so scheduling ran on `setInterval` — the one thing guaranteed to wobble when the main thread is busy. It now has an output and a silent sink; ticks come from the audio thread. Lookahead 300 ms, late-drop threshold 150 ms.

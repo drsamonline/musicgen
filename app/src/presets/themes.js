@@ -1,5 +1,13 @@
 // Themes: FX bias, texture density, title words, artwork palette.
 export const THEMES = {
+  // No theme: no ambience, no palette bias, plain titles.
+  none: {
+    id: 'none', name: 'None (plain)',
+    fxBias: { reverb: 0, delay: 0, chorus: 0 },
+    textureDensity: 0, brightness: 0.5,
+    palette: ['#0b0e17', '#1b2440', '#7f9bff', '#e8ecf7'],
+    words: ['Untitled', 'Sketch', 'Study', 'Take', 'Draft'],
+  },
   space: {
     id: 'space', name: 'Space',
     fxBias: { reverb: 0.25, delay: 0.15, chorus: 0.2 },

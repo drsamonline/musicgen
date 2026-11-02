@@ -14,6 +14,7 @@ import { generate, debouncedGenerate, pushHistory, snapshot } from './generate.j
 import { applyTheme } from './visuals.js';
 import { openSettings } from './exporters.js';
 import { setVizMode } from './visuals.js';
+import { TEXTURE_NAMES } from '../audio/textures.js';
 
 // ------------------------------------------------------------- boot
 export function fillSelect(sel, items, selected) {
@@ -27,12 +28,21 @@ export function fillSelect(sel, items, selected) {
   }
 }
 
+// Ambience is the one axis where "none" is the most likely choice, so it gets
+// its own list rather than being buried in the theme.
+const AMBIENCE = [
+  { id: 'auto', name: 'Auto (from theme)' },
+  { id: 'none', name: 'None (silent)' },
+  ...TEXTURE_NAMES.map((id) => ({ id, name: id[0].toUpperCase() + id.slice(1) })),
+];
+
 export function buildSelects() {
   fillSelect(els.style, Object.values(STYLES), state.presets.style);
   fillSelect(els.mood, Object.values(MOODS), state.presets.mood);
   fillSelect(els.theme, Object.values(THEMES), state.presets.theme);
   fillSelect(els.type, Object.values(TYPES), state.presets.type);
   fillSelect(els.tech, Object.values(TECHS), state.presets.tech);
+  fillSelect(els.texture, AMBIENCE, state.presets.texture ?? 'auto');
 }
 
 export function syncControls() {
@@ -42,6 +52,7 @@ export function syncControls() {
   els.theme.value = p.theme;
   els.type.value = p.type;
   els.tech.value = p.tech;
+  if (els.texture) els.texture.value = p.texture ?? 'auto';
   els.bpm.value = String(p.bpm);
   els.bpmout.textContent = String(p.bpm);
   els.timesig.value = `${p.timeSig[0]}x${p.timeSig[1]}`;
@@ -86,6 +97,7 @@ export function wirePresets() {
   bind(els.theme, 'theme');
   bind(els.type, 'type');
   bind(els.tech, 'tech');
+  bind(els.texture, 'texture');
 
   els.bpm.addEventListener('input', () => {
     const v = Math.max(BPM_MIN, Math.min(BPM_MAX, Number(els.bpm.value)));

@@ -9,7 +9,7 @@ export const els = {
   ab: $('ab'), loop: $('loop'),
   title: $('title'), meta: $('meta'), seed: $('seed'), offline: $('offline'),
   viz: $('viz'), progressbar: $('progressbar'),
-  style: $('style'), mood: $('mood'), theme: $('theme'), bpm: $('bpm'),
+  style: $('style'), mood: $('mood'), theme: $('theme'), bpm: $('bpm'), texture: $('texture'),
   bpmout: $('bpmout'), type: $('type'), tech: $('tech'),
   timesig: $('timesig'), tempodrift: $('tempodrift'), tempodriftout: $('tempodriftout'),
   intensity: $('intensity'), intensityout: $('intensityout'),

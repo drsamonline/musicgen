@@ -511,6 +511,42 @@ try {
   check('A-B-A reuses section A material', features.aliasSame);
   check('chord rhythm varies between bars', features.varied, `${features.chordCount} chord notes`);
 
+  console.log('\n"None" in the dropdowns');
+  const noneOpts = await page.evaluate(() => {
+    const out = {};
+    for (const id of ['style', 'mood', 'theme', 'tech', 'type', 'texture']) {
+      const sel = document.getElementById(id);
+      out[id] = sel ? [...sel.options].map((o) => o.value) : null;
+    }
+    return out;
+  });
+  for (const id of ['style', 'mood', 'theme', 'tech', 'type']) {
+    check(`${id} offers None`, Array.isArray(noneOpts[id]) && noneOpts[id].includes('none'),
+      (noneOpts[id] || []).join(','));
+  }
+  check('ambience offers Auto, None and the textures',
+    noneOpts.texture?.includes('auto') && noneOpts.texture?.includes('none') && noneOpts.texture?.includes('rain'),
+    (noneOpts.texture || []).join(','));
+
+  const ambience = await page.evaluate(async () => {
+    const { state } = await import('./src/state.js');
+    const { compose } = await import('./src/core/composer.js');
+    const sel = document.getElementById('texture');
+    const before = state.song.tracks.bed.length;
+    sel.value = 'none';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 500));
+    const after = state.song.tracks.bed.length;
+    sel.value = 'fire';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 500));
+    const kinds = state.song.tracks.bed.map((n) => n.texture);
+    return { before, after, kinds };
+  });
+  check('choosing None removes the ambience', ambience.after === 0, `bed went ${ambience.before} → ${ambience.after}`);
+  check('choosing a texture applies it', ambience.kinds.length > 0 && ambience.kinds.every((k) => k === 'fire'),
+    ambience.kinds.join(','));
+
   console.log('\nThemes');
   const themeStart = await page.evaluate(() => document.documentElement.dataset.theme);
   await page.click('#themetoggle');

@@ -15,6 +15,7 @@ import { encodeState, decodeState } from '../../app/src/export/artwork.js';
 import { safeHarmonicsFor } from '../../app/src/audio/instruments.js';
 import { makeTempoMap, flatTempo, describeTempo } from '../../app/src/core/tempo.js';
 import { extractTheme, parseMidi } from '../../app/src/import/midi.js';
+import { randomPresets } from '../../app/src/presets/compatibility.js';
 import { zipStore, crc32 } from '../../app/src/export/zip.js';
 
 let pass = 0;
@@ -271,6 +272,41 @@ test('garbage is rejected, not crashed on', () => {
   let threw = false;
   try { extractTheme(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])); } catch { threw = true; }
   assert(threw, 'a non-MIDI buffer should throw');
+});
+
+console.log('\n"None" is a real option');
+test('every axis accepts none and still composes', () => {
+  const axes = ['style', 'mood', 'theme', 'tech', 'type'];
+  for (const axis of axes) {
+    const presets = {
+      style: 'lofi', mood: 'dreamy', theme: 'rain', tech: 'analog', bpm: 90, type: 'loop',
+    };
+    presets[axis] = 'none';
+    const song = compose(presets, `none-${axis}`);
+    assert(song.totalNotes > 0, `${axis}=none produced no notes`);
+    assert(song.bars > 0, `${axis}=none produced no bars`);
+  }
+  // and all of them at once
+  const bare = compose({ style: 'none', mood: 'none', theme: 'none', tech: 'none', bpm: 90, type: 'none' }, 'all-none');
+  assert(bare.totalNotes > 0, 'the plain song has no notes');
+  assert(bare.tracks.bed.length === 0, 'theme=none should not add ambience');
+});
+test('the ambience dial overrides the theme', () => {
+  const auto = compose({ style: 'ambient', mood: 'calm', theme: 'rain', tech: 'noise', bpm: 60, type: 'drone' }, 'tex-auto');
+  assert(auto.tracks.bed.length > 0, 'auto should give a bed');
+  const off = compose({ style: 'ambient', mood: 'calm', theme: 'rain', tech: 'noise', bpm: 60, type: 'drone', texture: 'none' }, 'tex-off');
+  eq(off.tracks.bed.length, 0);
+  const fire = compose({ style: 'ambient', mood: 'calm', theme: 'rain', tech: 'noise', bpm: 60, type: 'drone', texture: 'fire' }, 'tex-fire');
+  assert(fire.tracks.bed.every((n) => n.texture === 'fire'), 'explicit texture was not honoured');
+});
+test('random never picks the plain options', () => {
+  const rng = new Rng('random-none');
+  for (let i = 0; i < 30; i++) {
+    const p = randomPresets(rng, { chaos: 0.3 });
+    for (const axis of ['style', 'mood', 'theme', 'tech']) {
+      assert(p[axis] !== 'none', `random chose none for ${axis}`);
+    }
+  }
 });
 
 console.log('\nTextures and transitions');

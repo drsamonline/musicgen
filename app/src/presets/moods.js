@@ -1,5 +1,13 @@
 // Mood presets: mode/scale, register, dynamics, tension bias.
 export const MOODS = {
+  // Neutral: no emotional bias at all, so the style decides.
+  none: {
+    id: 'none', name: 'None (neutral)',
+    modes: [['ionian', 1], ['aeolian', 1], ['dorian', 1]],
+    register: 0, velCurve: 0.6, tensionBias: 0,
+    seventhBias: 0, add9Bias: 0, densityBias: 0, brightness: 0.5,
+    restChance: 0.25, staccato: 0.25,
+  },
   happy: {
     id: 'happy', name: 'Happy',
     modes: [['ionian', 3], ['lydian', 1], ['mixolydian', 1]],

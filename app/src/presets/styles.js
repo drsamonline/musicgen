@@ -2,6 +2,27 @@
 
 // degrees are 0-indexed scale degrees of the harmony scale (0 = I)
 export const STYLES = {
+  // "None" is a real choice: no genre baggage, a plain four-on-the-floor
+  // pulse and the simplest useful progression. Everything else is still
+  // available from the other dials.
+  none: {
+    id: 'none', name: 'None (plain)', bpm: [70, 120], swing: 0,
+    progressions: [[0, 5, 3, 4], [0, 3, 4, 5], [0, 4, 5, 3]],
+    seventhChance: 0.2, add9Chance: 0.05, susChance: 0,
+    voicing: 'close', voiceCount: 3,
+    groove: {
+      kick: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+      snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+      hat: [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0],
+    },
+    hatDensity: 0.5, fillChance: 0.15, ghostChance: 0.05,
+    bassPattern: 'root', arpRate: 0.5, chordRhythmChance: 0,
+    lufs: -16, development: ['transposeUp', 'fragment'],
+    intensity: [0.45, 0.55, 0.6, 0.5],
+    mix: { drums: 0.8, bass: 0.75, chords: 0.55, lead: 0.5, pad: 0.3 },
+    fx: { reverb: 0.3, delay: 0.15, chorus: 0.05 },
+    sidechain: false,
+  },
   lofi: {
     id: 'lofi', name: 'Lo-fi', bpm: [68, 92], swing: 0.16,
     progressions: [
@@ -249,6 +270,7 @@ export const STYLE_IDS = Object.keys(STYLES);
 // Per-style behaviour added in v2: key modulation, chord rhythm variety,
 // lead doubling, stereo width. Kept separate so a style stays one object.
 export const STYLE_EXTRAS = {
+  none: { modulation: 0, chordRhythm: 0, doubleLead: 0, width: 0.3, texture: 0, polyrhythm: 0 },
   lofi: { modulation: 0.1, chordRhythm: 0.35, doubleLead: 0, width: 0.35, texture: 0.15, polyrhythm: 0.05 },
   cinematic: { modulation: 0.35, chordRhythm: 0.15, doubleLead: 0.2, width: 0.6, texture: 0.65, polyrhythm: 0.1 },
   edm: { modulation: 0.15, chordRhythm: 0.2, doubleLead: 0.15, width: 0.5, texture: 0, polyrhythm: 0.15 },

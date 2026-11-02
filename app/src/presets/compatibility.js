@@ -88,24 +88,29 @@ export function techWeights(styleId) {
 
 // Sample a full preset set through the compatibility table.
 // `chaos` in [0,1] — the chance of ignoring the table entirely.
+// "none" is a deliberate choice, never a random one: Random should give you a
+// genre, and the plain option is there for when you want to strip it back.
+const pickable = (obj) => Object.keys(obj).filter((id) => id !== 'none');
+
 export function randomPresets(rng, { chaos = 0.15, bpmRange = [40, 200], locks = {} } = {}) {
-  const styleIds = Object.keys(STYLES);
+  const styleIds = pickable(STYLES);
   const style = locks.style ? null : rng.pick(styleIds);
   const styleId = style ?? locks.styleValue ?? 'lofi';
   const bypass = rng.chance(chaos);
-  const s = STYLES[styleId];
+  const s = STYLES[styleId] || STYLES.lofi;
+  const table = TABLE[styleId] || TABLE.lofi;
 
   const mood = locks.mood
     ? null
     : bypass
-      ? rng.pick(Object.keys(MOODS))
-      : rng.weighted(Object.keys(TABLE[styleId].moods), moodWeights(styleId));
+      ? rng.pick(pickable(MOODS))
+      : rng.weighted(Object.keys(table.moods).filter((id) => id !== 'none'), moodWeights(styleId));
 
   const tech = locks.tech
     ? null
     : bypass
       ? rng.pick(TECH_IDS)
-      : rng.weighted(Object.keys(TABLE[styleId].techs), techWeights(styleId));
+      : rng.weighted(Object.keys(table.techs), techWeights(styleId));
 
   const theme = locks.theme
     ? null

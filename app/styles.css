@@ -836,3 +836,5 @@ a:focus-visible,
   font-size: 10px;
   letter-spacing: 0.06em;
 }
+
+.lock-spacer { width: 34px; height: 34px; }

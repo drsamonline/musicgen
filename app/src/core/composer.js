@@ -29,6 +29,7 @@ export const BPM_MIN = 20;
 export const BPM_MAX = 500;
 
 export const DEFAULT_PRESETS = {
+  texture: 'auto',
   style: 'lofi', mood: 'dreamy', theme: 'rain', tech: 'analog',
   bpm: 84, type: 'full', timeSig: [4, 4],
   key: null, bars: null, intensityBias: 0, swing: null, chaos: 0.15,
@@ -43,6 +44,7 @@ export function normalisePresets(p) {
   if (!TECHS[out.tech]) out.tech = 'analog';
   if (!TYPES[out.type]) out.type = 'full';
   out.bpm = Math.max(BPM_MIN, Math.min(BPM_MAX, Math.round(Number(out.bpm) || 84)));
+  out.texture = out.texture || 'auto';
   out.tempoDrift = Math.max(0, Math.min(0.35, Number(out.tempoDrift ?? DEFAULT_DRIFT) || 0));
   const ts = Array.isArray(out.timeSig) ? out.timeSig : [4, 4];
   out.timeSig = [Math.max(1, Math.min(12, ts[0] | 0)), ts[1] | 0 || 4];
@@ -806,14 +808,18 @@ export function compose(rawPresets, seed) {
       const rngP = rngS.fork('pad');
       tracks.pad.push(...padSection(rngP, ctx, section, voiced, section.leadNotes || []));
     }
-    if ((style.texture ?? 0) > 0 && (allowed.includes('pad') || sec.name === 'drone')) {
+    const bedTexture = textureFor(presets.theme, style, rng.fork('tex' + si), presets.texture ?? 'auto');
+    const wantsBed = presets.texture === 'none'
+      ? false
+      : (bedTexture != null && (presets.texture !== 'auto' || (style.texture ?? 0) > 0));
+    if (wantsBed && (allowed.includes('pad') || sec.name === 'drone')) {
       const level = 0.22 + intensity * 0.2;
       tracks.bed.push({
         t: barCursor * beatsPerBar,
         d: sec.bars * beatsPerBar,
         p: 48 + sTonic,
         v: level * (style.texture ?? 0.5),
-        texture: textureFor(presets.theme, style, rng.fork('tex' + si)),
+        texture: bedTexture,
       });
     }
     if (presets.arp && allowed.includes('chords')) {
@@ -934,7 +940,11 @@ export function collectTransitions(sections, style, mood, tempoMap, beatsPerBar)
   return out.slice(0, 8);
 }
 
-export function textureFor(themeId, style, rng) {
+// `explicit` comes from the Ambience dial: 'auto' follows the theme, 'none'
+// means silence, and any other value is the texture the listener asked for.
+export function textureFor(themeId, style, rng, explicit = 'auto') {
+  if (explicit === 'none') return null;
+  if (explicit && explicit !== 'auto') return explicit;
   const options = THEME_TEXTURE[themeId] || ['rain', 'wind', 'vinyl'];
   if (style?.texture && style.texture > 0.6) return options[rng.int(options.length)];
   return options[0];

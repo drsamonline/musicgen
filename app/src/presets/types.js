@@ -1,5 +1,10 @@
 // Song types: structure generators.
 export const TYPES = {
+  // No form: one continuous section, no intro/outro, nothing repeated.
+  none: {
+    id: 'none', name: 'None (continuous)',
+    form: [['loop', 16]], loopStart: 0,
+  },
   loop: {
     id: 'loop', name: 'Loop',
     form: [['loop', 8]], loopStart: 0,
