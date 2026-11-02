@@ -4,7 +4,7 @@
 
 [![tests](https://github.com/drsamonline/musicgen/actions/workflows/test.yml/badge.svg)](https://github.com/drsamonline/musicgen/actions/workflows/test.yml)
 [![a11y: axe clean](https://img.shields.io/badge/axe%20wcag%202.1%20AA-clean-c6f24e.svg)](#accessibility--audit)
-[![license: MIT](https://img.shields.io/badge/license-MIT-c6f24e.svg)](LICENSE)
+[![license: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-c6f24e.svg)](LICENSE)
 [![dependencies: 0](https://img.shields.io/badge/dependencies-0-9aa8ff.svg)](#)
 [![tempo: 20–500 BPM](https://img.shields.io/badge/tempo-20--500%20BPM-9aa8ff.svg)](#)
 [![size: 76 KB gzipped](https://img.shields.io/badge/size-68%20KB%20gzipped-9aa8ff.svg)](#)
@@ -138,11 +138,15 @@ docs/ENHANCEMENTS.md  the backlog
 
 ## Credits and licences
 
-Two of my own other repositories informed this one. **ambient-sound-studio** (personal-use licence) is where the idea of layered synthesised textures comes from — the eight beds here are reimplemented for this engine, not copied. **eon-commando** (same) contributed the noise-sweep primitive that became the section risers. **audio-kit** (PolyForm Noncommercial) shares the same "patterns, not files" philosophy; its code is deliberately *not* vendored here, because MusicGen is MIT and mixing licences in one bundle is a trap.
+Two of my own other repositories informed this one. **ambient-sound-studio** (personal-use licence) is where the idea of layered synthesised textures comes from — the eight beds here are reimplemented for this engine, not copied. **eon-commando** (same) contributed the noise-sweep primitive that became the section risers. **audio-kit** (PolyForm Noncommercial) shares the same "patterns, not files" philosophy; its code is deliberately *not* vendored here, because mixing licences in one bundle is a trap.
 
 ## Layout
 
-The audio engine is five small modules rather than one file: `worklets.js` (AudioWorklet loading and fallbacks), `graph.js` (track chains, buses, master chain), `scheduler.js` (tempo map, events, automation, voice dispatch), `player.js` (live transport) and `render.js` (offline rendering). `engine.js` is a barrel that re-exports the public API, so callers never need to know the layout.
+Two splits, both done for editability rather than tidiness.
+
+**The engine** is five modules behind a barrel (`engine.js`): `worklets.js` (AudioWorklet loading and fallbacks), `graph.js` (track chains, buses, master chain), `scheduler.js` (tempo map, events, automation, voice dispatch), `player.js` (live transport) and `render.js` (offline rendering).
+
+**The UI** is six modules behind `main.js` (205 lines of wiring and nothing else): `ui/ctx.js` (the DOM map, the mutable singletons, the small helpers), `ui/dials.js` (presets, random/evolve/mutate, groove editor), `ui/generate.js` (history, compose, the three readouts), `ui/transport.js` (player lifecycle, loop, A/B, wake lock, MediaSession, install), `ui/visuals.js` (theme, four visualisers, piano-roll gestures) and `ui/exporters.js` (WAV, stems, MIDI, JSON, art, share, library, recording).
 
 ## Contributing
 
@@ -164,4 +168,4 @@ Stems share one gain (measured on the mix) rather than being re-mixed per track 
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Music you generate with it is yours.
+PolyForm Noncommercial 1.0.0 — see [LICENSE](LICENSE). Music you generate with it is yours.

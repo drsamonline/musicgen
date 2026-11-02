@@ -1,10 +1,10 @@
 {
   "name": "musicgen",
-  "version": "3.1.0",
+  "version": "4.0.0",
   "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "description": "A pocket generative composer — offline-first PWA that writes, synthesises, masters and exports music in the browser",
-  "license": "MIT",
   "homepage": "https://drsamonline.github.io/musicgen/",
   "repository": {
     "type": "git",

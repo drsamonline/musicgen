@@ -2,6 +2,10 @@
 
 Thanks for looking. This project has one unusual rule, and everything else follows from it.
 
+## Licence
+
+Contributions are accepted under the repository's licence, **PolyForm Noncommercial 1.0.0**. Do not paste in code from a project with an incompatible licence, and say where an idea came from.
+
 ## The determinism rule
 
 `src/core/` is a **pure** library: same `(presets, seed)` in, byte-identical song out. That means no `Math.random()`, no `Date.now()`, no `document`, no `fetch` in those files. `npm run lint` enforces it in CI, so a PR that reaches for the clock fails fast rather than mysteriously breaking every shared link.

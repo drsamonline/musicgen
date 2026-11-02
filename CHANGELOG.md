@@ -4,6 +4,7 @@ Generated from the commit history by `npm run changelog`.
 
 ## 2026-11-02
 
+- fix: the end-of-song click; feat: ambient textures and section risers (v3.1.0) (`c57fa89`)
 - feat: one theme per song, MIDI import, engine split into modules (v3.0.0) (`321ba91`)
 
 ## 2026-11-01

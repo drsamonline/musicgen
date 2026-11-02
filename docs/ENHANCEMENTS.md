@@ -176,6 +176,11 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 
 ---
 
+## What v4.0.0 closed
+
+- **The UI split.** `main.js` was 1,357 lines doing seven jobs; it is now 205 lines of wiring over six `ui/` modules. The split found four real bugs on the way (`view` spread into an object literal, three missing cross-module imports) — which is the argument for splitting, not the tidiness.
+- **Licence: MIT → PolyForm Noncommercial 1.0.0**, matching the rest of the estate. Prior releases stay MIT for anyone who already has them.
+
 ## What v3.1.0 closed
 
 - **The end-of-song click.** A render with no tail ended on a non-zero sample (−0.05 to −0.22 at full level) — the master was cut dead at `durationSec`, live and in exports. There is now a 140 ms master fade at the end, a 20 ms fade-in at the start, and a fade at every loop wrap. Measured: the last sample went from −0.219 to −0.028 and then to silence.
