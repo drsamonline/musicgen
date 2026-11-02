@@ -181,6 +181,7 @@
     <button data-act="import">Import song JSON…</button>
     <button data-act="art">Cover art — 1024 px PNG</button>
     <button data-act="record">Record live output (WebM)</button>
+    <button data-act="importmidi">Import a MIDI theme…</button>
     <div class="row sheet-row">
       <label for="exporttarget">Loudness</label>
       <select id="exporttarget">
@@ -263,6 +264,7 @@
   </dialog>
 
   <input id="fileinput" type="file" accept=".json,application/json" aria-label="Import a song JSON file" hidden />
+  <input id="midiinput" type="file" accept=".mid,.midi,audio/midi" aria-label="Import a MIDI file as the theme" hidden />
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <p id="live" class="sr-only" aria-live="polite"></p>

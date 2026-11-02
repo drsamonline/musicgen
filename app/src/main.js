@@ -44,6 +44,7 @@ const els = {
   sections: $('sections'), summary: $('summary'), toast: $('toast'), live: $('live'), notice: $('notice'),
   sheet: $('menu-sheet'), help: $('help'), library: $('library'),
   libraryList: $('library-list'), searchlib: $('searchlib'), fileinput: $('fileinput'),
+  midiinput: $('midiinput'),
   exporttarget: $('exporttarget'),
 };
 
@@ -887,6 +888,24 @@ function applySong(song) {
   toast(`Imported “${song.title}”`);
 }
 
+async function onMidiPicked() {
+  const file = els.midiinput.files?.[0];
+  if (!file) return;
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const { notes, beats, trackName } = extractTheme(bytes, { maxBeats: state.presets.timeSig[0] * 2 });
+    if (!notes.length) throw new Error('no notes found');
+    pushHistory();
+    setPresets({ themeSeed: notes });
+    generate();
+    notice(`Theme imported from “${file.name}”${trackName ? ` (${trackName})` : ''} — ${notes.length} notes over ${beats} beats. Every section now derives from it.`);
+    toast('Theme imported');
+  } catch (err) {
+    fail('MIDI import', err);
+    toast('That MIDI file did not contain a melody I could read');
+  }
+}
+
 async function onFilePicked() {
   const file = els.fileinput.files?.[0];
   if (!file) return;
@@ -1068,6 +1087,7 @@ function wireActions() {
     if (act === 'library') openLibrary();
     if (act === 'exportlib') exportLibrary();
     if (act === 'record') toggleRecord();
+    if (act === 'importmidi') els.midiinput.click();
     if (act === 'install') doInstall();
     if (act === 'help') els.help.showModal();
   });
@@ -1080,6 +1100,7 @@ function wireActions() {
   $('save').addEventListener('click', doSave);
   els.seed.addEventListener('click', doShare);
   els.fileinput.addEventListener('change', onFilePicked);
+  els.midiinput.addEventListener('change', onMidiPicked);
 
   document.addEventListener('keydown', (e) => {
     if (e.target.matches('input, select, textarea, dialog')) return;

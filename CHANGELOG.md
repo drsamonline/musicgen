@@ -4,6 +4,7 @@ Generated from the commit history by `npm run changelog`.
 
 ## 2026-11-01
 
+- feat: variable tempo - a song breathes instead of clicking (v2.5.0) (`662e421`)
 - fix: playback watchdog, anti-aliasing, master soft-clip, human phrasing (v2.4.0) (`9115e54`)
 - ci: visual regression reports instead of blocking (`4d84d65`)
 - fix(visual): puppeteer returns a Uint8Array, pngjs wants a Buffer (`7f6609c`)

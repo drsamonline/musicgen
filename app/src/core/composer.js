@@ -301,6 +301,90 @@ function bassBar(rng, style, chord, intensity, ctx) {
 }
 
 // ------------------------------------------------------------- motif/lead
+// ---------------------------------------------------------------- theme
+// One idea for the whole song. Every section is a derivation of this, which is
+// what makes a piece sound composed rather than assembled.
+
+export function buildTheme(rng, ctx) {
+  const { beatsPerBar, tonic, scaleName, mood } = ctx;
+  const scale = scaleOf(scaleName);
+  const home = harmonyScaleOf(scaleName);
+  const bars = 2;
+  const steps = Math.round(beatsPerBar * 2 * bars);
+  const centre = 62 + (mood.register ?? 0) * 4;
+  const chordTones = [0, 2, 4].map((d) => (tonic + home[d % home.length]) % 12);
+
+  const notes = [];
+  let last = null;
+  let step = 0;
+  while (step < steps) {
+    const position = step / steps;
+    // rhythm: denser in the middle of the phrase, space at both ends
+    const rest = rng.chance(0.22 + Math.abs(position - 0.5) * 0.35);
+    if (rest) { step += 1; continue; }
+    let p;
+    if (last == null) {
+      const options = chordTones.map((c) => 60 + ((c - 60) % 12 + 12) % 12);
+      p = options.reduce((a, b) => (Math.abs(b - centre) < Math.abs(a - centre) ? b : a));
+    } else if (step % 4 === 0) {
+      // land on a chord tone at the strong beats
+      const base = last - pc(last);
+      p = chordTones.map((c) => base + c).reduce((a, b) => (Math.abs(b - last) < Math.abs(a - last) ? b : a));
+    } else {
+      const upBias = position < 0.5 ? 1.7 : 0.6;
+      const d = rng.weighted([-2, -1, 1, 2], [1 * (2 - upBias), 3, 3 * upBias, 1 * upBias]);
+      p = fromDeg(degIndex(last, tonic, scale) + d, tonic, scale);
+    }
+    p = clampPitch(p, 50, 88);
+    const dur = rng.weighted([0.5, 1, 2], [2, 3, 1]);
+    notes.push({ t: step * 0.5, d: dur, p, v: 0.62 + rng.float() * 0.2 });
+    last = p;
+    step += dur > 1 ? 2 : 1;
+  }
+  if (!notes.length) notes.push({ t: 0, d: 2, p: centre, v: 0.6 });
+  // the theme ends where it can be picked up again
+  notes[notes.length - 1].d = Math.max(1, notes[notes.length - 1].d);
+  return notes;
+}
+
+// How each kind of section uses the theme.
+export function deriveTheme(theme, sectionName, ctx, rng) {
+  const { tonic, scaleName, beatsPerBar } = ctx;
+  const span = beatsPerBar * 2;
+  const shift = (n, degrees) => ({
+    ...n, p: fromDeg(degIndex(n.p, tonic, scaleOf(scaleName)) + degrees, tonic, scaleOf(scaleName)),
+  });
+
+  switch (sectionName) {
+    case 'intro':
+      return theme.slice(0, Math.ceil(theme.length / 2)).map((n) => ({ ...n, v: n.v * 0.7 }));
+    case 'verse':
+      return theme.map((n) => ({ ...n, v: n.v * 0.92 }));
+    case 'chorus':
+      // same shape, lifted a third and opened out — and into the upper
+      // register, so the chorus is heard as a lift and not a repeat
+      return theme.map((n) => {
+        const lifted = shift(n, 2);
+        return {
+          ...lifted,
+          p: clampPitch(lifted.p < 74 ? lifted.p + 12 : lifted.p, 50, 96),
+          v: Math.min(1, n.v * 1.12),
+          d: n.d * 0.85,
+        };
+      });
+    case 'bridge':
+      return applyTransform('invert', theme, { rng, span, tonicPc: tonic, scale: scaleName })
+        .map((n) => ({ ...n, v: n.v * 0.8 }));
+    case 'outro':
+      return theme.slice(0, Math.ceil(theme.length * 0.6))
+        .map((n) => ({ ...n, v: n.v * 0.75, d: n.d * 1.6 }));
+    case 'break':
+      return theme.filter((_, i) => i % 2 === 0).map((n) => ({ ...n, v: n.v * 0.8 }));
+    default:
+      return theme;
+  }
+}
+
 function makeMotif(rng, ctx, chord, density) {
   const { beatsPerBar, tonic, scaleName, mood } = ctx;
   const scale = scaleOf(scaleName);
@@ -446,7 +530,7 @@ function leadSection(rng, style, ctx, section, chords) {
         }
         if (bd <= 2) p = best;
       }
-      out.push({ ...n, t: barStart + n.t, p: clampPitch(p, 50, 90) });
+      out.push({ ...n, t: barStart + n.t, p: clampPitch(p, 50, 96) });
     }
   }
 
@@ -573,6 +657,13 @@ export function compose(rawPresets, seed) {
 
   const tracks = { drums: [], bass: [], chords: [], lead: [], pad: [], arp: [], bed: [] };
   const songSections = [];
+
+  // One theme for the whole song, in the home key: every section derives from
+  // it, which is what makes a piece sound composed rather than assembled.
+  const songTheme = presets.themeSeed
+    ? normaliseTheme(presets.themeSeed, tonic, scaleName)
+    : buildTheme(rng.fork('theme'), { beatsPerBar, tonic, scaleName, mood });
+
   let barCursor = 0;
   let prevProg = null;
   let prevVoicing = null;
@@ -618,6 +709,8 @@ export function compose(rawPresets, seed) {
     const ctx = {
       tonic: sTonic, scaleName, beatsPerBar, mood, barStart: barCursor * beatsPerBar,
       bassRoot: null,
+      theme: songTheme,
+      sectionName: sec.name,
       grooveOverride: presets.grooveOverride || null,
       polyrhythm: false, // set per section from the drum stream below
     };
@@ -796,6 +889,7 @@ export function compose(rawPresets, seed) {
     lufs: style.lufs ?? -14,
     monoBass: !!style.monoBass,
     sidechain: !!style.sidechain,
+    theme: songTheme,
     width: style.width ?? 0.4,
     variant: presets.variant ?? rng.fork('variant').int(3),
     tuning: presets.microtuning ? { cents: justIntonationCents(tonic, mode) } : null,
@@ -805,6 +899,22 @@ export function compose(rawPresets, seed) {
 }
 
 function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+
+// An imported theme (from MIDI) is just notes in beats; clamp it into range so
+// a wild import cannot break the register rules the validator enforces.
+export function normaliseTheme(notes, tonic, scaleName) {
+  const scale = scaleOf(scaleName);
+  const start = notes.length ? Math.min(...notes.map((n) => n.t)) : 0;
+  return notes
+    .map((n) => ({
+      t: Math.max(0, n.t - start),
+      d: Math.max(0.25, Math.min(4, n.d ?? 0.5)),
+      p: clampPitch(Math.round(n.p), 45, 92),
+      v: Math.max(0.2, Math.min(1, n.v ?? 0.7)),
+    }))
+    .sort((a, b) => a.t - b.t)
+    .slice(0, 24);
+}
 
 // Just-intonation ratios for a major scale, expressed as cents away from
 // 12-TET so the engine can apply them as a detune per pitch class.

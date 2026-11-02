@@ -7,7 +7,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-c6f24e.svg)](LICENSE)
 [![dependencies: 0](https://img.shields.io/badge/dependencies-0-9aa8ff.svg)](#)
 [![tempo: 20–500 BPM](https://img.shields.io/badge/tempo-20--500%20BPM-9aa8ff.svg)](#)
-[![size: 72 KB gzipped](https://img.shields.io/badge/size-68%20KB%20gzipped-9aa8ff.svg)](#)
+[![size: 76 KB gzipped](https://img.shields.io/badge/size-68%20KB%20gzipped-9aa8ff.svg)](#)
 [![PWA: offline-first](https://img.shields.io/badge/PWA-offline--first-c6f24e.svg)](#)
 [![web audio api](https://img.shields.io/badge/web%20audio-api-ff9f6b.svg)](#)
 
@@ -52,6 +52,8 @@ Then use your browser's **Install** / **Add to Home Screen** (iOS: Share → Add
 
 **The synthesis** — subtractive, FM, chiptune (real `PeriodicWave` pulses), additive, a six-frame **wavetable with a real morph**, Karplus-Strong, a **formant/vowel** layer and noise instruments, plus two **AudioWorklet** engines (granular and a waveguide) with native fallbacks; a drum kit built from oscillators and filtered noise; generated convolution reverb, tempo-synced delay and chorus; glue compressor and limiter on the master, mono bass below 120 Hz, sidechain ducking for EDM, a filter envelope and velocity-to-timbre on every voice, analogue drift, and a stereo-width tap. A voice pool steals the quietest voice with a fade; the scheduler runs a 200 ms lookahead and skips late notes instead of firing them in a burst.
 
+**MIDI both ways** — export the song as Type-1 MIDI, or **import a MIDI file as the theme**: the highest-register line becomes the song's idea and everything derives from it.
+
 **The exports** — WAV (16/24/32-bit, normalised to a chosen loudness target under a −1 dBTP ceiling), per-track stems as a zip with per-stem loudness in the readme, Type-1 MIDI, full song JSON (export *and* import), 1024 px cover art, and seed links that reproduce the exact song elsewhere.
 
 **The platform bits** — installable PWA with a real install prompt and an offline badge, MediaSession metadata with generated artwork, screen Wake Lock, four visualisers, a piano roll you can zoom, pan and scrub, section looping, A/B against the previous song, undo/redo, a library with search/rename/duplicate, session restore, a text song summary for screen readers, `prefers-reduced-motion` and `prefers-color-scheme` support, and a strict CSP (`default-src 'self'`) with zero runtime fetches.
@@ -72,7 +74,7 @@ npm run audit
 ## Tests
 
 ```bash
-npm test              # 39 unit tests, no browser needed
+npm test              # 42 unit tests, no browser needed
 npm run test:browser  # 96 tests in real Chromium with real Web Audio
 npm run lint          # determinism lint: no Math.random / Date.now in pure modules
 npm run budget        # shell size, precache completeness, no external requests
@@ -131,6 +133,10 @@ tests/unit/ tests/browser/
 scripts/              screenshots.mjs, audit.mjs
 docs/ENHANCEMENTS.md  the backlog
 ```
+
+## Layout
+
+The audio engine is five small modules rather than one file: `worklets.js` (AudioWorklet loading and fallbacks), `graph.js` (track chains, buses, master chain), `scheduler.js` (tempo map, events, automation, voice dispatch), `player.js` (live transport) and `render.js` (offline rendering). `engine.js` is a barrel that re-exports the public API, so callers never need to know the layout.
 
 ## Contributing
 

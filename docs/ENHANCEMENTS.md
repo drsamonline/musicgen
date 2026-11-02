@@ -176,6 +176,18 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 
 ---
 
+## What v3.0.0 closed
+
+- **One theme per song (1.2).** `buildTheme()` writes a two-bar idea; `deriveTheme()` gives each section its own version of it — verse plain, chorus lifted a third and into the upper register, bridge inverted, outro fragmented. That is the difference between a song and a playlist of eight bars.
+- **MIDI import (8.4).** A real SMF reader (running status, type 0/1, tempo meta) picks the highest-register melodic line, monophonises it by truncation rather than deletion, and hands it to the composer as `themeSeed`. Round-trips through our own MIDI writer in the tests.
+- **Engine split.** `engine.js` went from 659 lines to a 12-line barrel over `worklets.js`, `graph.js`, `scheduler.js`, `player.js` and `render.js`.
+- **Group buses.** Drums / low / mid / lead each get a compressor, instead of nine tracks fighting at the master.
+
+### Not done, and why
+
+- **FDN reverb.** I built one, measured it, and it blew up — the feedback matrix ran away and the master limiter turned the whole render into a wall. Rather than ship a reverb I cannot hear, I reverted to the measured-good convolution IR and left this here. It needs an impulse-response test (decay must be monotonic) before it goes back in.
+- **`main.js` split.** Still one file at ~1,100 lines. The engine split was asked for; this one is next.
+
 ## What v2.5.0 closed
 
 **Tempo is now a map, not a number.** `src/core/tempo.js` holds a piecewise tempo map with `secondsAt()` / `beatAt()` / `bpmAt()`; the composer writes sections and phrases into it and the engine reads every conversion from it — note times, note lengths, automation, loop points, section jumps and the render length. A song therefore lifts into the chorus, settles in the verse, gets deterministic rubato per phrase and eases off over its last two bars. The BPM dial is the centre, *Tempo drift* is how far it may wander.

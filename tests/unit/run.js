@@ -14,6 +14,7 @@ import { integratedLufs } from '../../app/src/audio/lufs.js';
 import { encodeState, decodeState } from '../../app/src/export/artwork.js';
 import { safeHarmonicsFor } from '../../app/src/audio/instruments.js';
 import { makeTempoMap, flatTempo, describeTempo } from '../../app/src/core/tempo.js';
+import { extractTheme, parseMidi } from '../../app/src/import/midi.js';
 import { zipStore, crc32 } from '../../app/src/export/zip.js';
 
 let pass = 0;
@@ -223,6 +224,53 @@ test('golden seeds are stable', () => {
     'Dash Glow / Toll Road|318|8|C mixolydian',
   ];
   eq(JSON.stringify(hashes), JSON.stringify(snapshot), 'golden seeds drifted');
+});
+
+console.log('\nTheme and MIDI');
+test('every song has one theme, and sections derive from it', () => {
+  const song = compose({ style: 'cinematic', mood: 'epic', theme: 'space', tech: 'analog', bpm: 100, type: 'full' }, 'thematic');
+  assert(Array.isArray(song.theme) && song.theme.length >= 4, `theme has ${song.theme?.length} notes`);
+  const verse = song.sections.find((s) => s.name === 'verse');
+  const chorus = song.sections.find((s) => s.name === 'chorus');
+  assert(verse && chorus, 'expected a verse and a chorus');
+  // the chorus is the theme lifted, so the lead should sit higher there
+  // compare the opening phrase of each section: that is where the derived
+  // theme plays verbatim, before the per-bar development transforms
+  const avg = (name) => {
+    const sec = song.sections.find((s) => s.name === name);
+    if (!sec) return null;
+    const from = sec.bar * song.beatsPerBar;
+    const to = from + song.beatsPerBar * 2;
+    const notes = song.tracks.lead.filter((n) => n.t >= from && n.t < to);
+    return notes.length ? notes.reduce((a, n) => a + n.p, 0) / notes.length : null;
+  };
+  const v = avg('verse');
+  const c = avg('chorus');
+  assert(v != null && c != null, 'verse and chorus both need lead notes');
+  assert(c > v, `chorus (${c?.toFixed(1)}) should sit above the verse (${v?.toFixed(1)})`);
+});
+test('a MIDI file round-trips into a usable theme', () => {
+  const song = compose({ style: 'jazz', mood: 'playful', theme: 'space', tech: 'analog', bpm: 120, type: 'loop' }, 'roundtrip');
+  const bytes = songToMidi(song);
+  const parsed = parseMidi(bytes);
+  assert(parsed.tracks.length >= 3, `parsed ${parsed.tracks.length} tracks`);
+  const theme = extractTheme(bytes, { maxBeats: 8 });
+  assert(theme.notes.length >= 4, `extracted ${theme.notes.length} notes`);
+  for (const n of theme.notes) {
+    assert(n.t >= 0 && n.d > 0, 'bad timing');
+    assert(n.p >= 0 && n.p <= 127, 'bad pitch');
+  }
+  // and the composer accepts it as a seed
+  const seeded = compose({
+    style: 'lofi', mood: 'calm', theme: 'rain', tech: 'analog', bpm: 84, type: 'full',
+    themeSeed: theme.notes,
+  }, 'seeded');
+  assert(seeded.theme.length === theme.notes.length, 'theme seed was not used');
+});
+test('garbage is rejected, not crashed on', () => {
+  let threw = false;
+  try { extractTheme(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])); } catch { threw = true; }
+  assert(threw, 'a non-MIDI buffer should throw');
 });
 
 console.log('\nTempo map');
