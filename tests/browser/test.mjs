@@ -511,6 +511,54 @@ try {
   check('A-B-A reuses section A material', features.aliasSame);
   check('chord rhythm varies between bars', features.varied, `${features.chordCount} chord notes`);
 
+  console.log('\nSeek and regenerate must not silence playback');
+  const resilience = await page.evaluate(async () => {
+    const { compose } = await import('./src/core/composer.js');
+    const { Player } = await import('./src/audio/engine.js');
+    const gainOf = (p) => p.graph.master.gain.value;
+    const song = compose({ style: 'lofi', mood: 'calm', theme: 'rain', tech: 'analog', bpm: 100, type: 'full' }, 'resilience');
+    const p = new Player(song);
+    await p.init();
+    if (p.ctx.state === 'suspended') await p.ctx.resume();
+    await p.play();
+    await new Promise((r) => setTimeout(r, 700));
+    const atStart = gainOf(p);
+
+    // seek to 60 %
+    await p.play(song.durationSec * 0.6);
+    await new Promise((r) => setTimeout(r, 600));
+    const afterSeek = gainOf(p);
+    const posAfterSeek = p.position;
+
+    // seek to 97 % — this used to schedule the closing fade in the past
+    await p.play(song.durationSec * 0.97);
+    await new Promise((r) => setTimeout(r, 500));
+    const afterLateSeek = gainOf(p);
+    const stillPlaying = p.playing;
+
+    // regenerate repeatedly: same context, new song
+    const ctxBefore = p.ctx;
+    for (let i = 0; i < 8; i++) {
+      const next = compose({ style: 'lofi', mood: 'calm', theme: 'rain', tech: 'analog', bpm: 100, type: 'loop' }, `regen-${i}`);
+      await p.setSong(next);
+    }
+    await new Promise((r) => setTimeout(r, 500));
+    const afterRegen = gainOf(p);
+    const sameContext = p.ctx === ctxBefore;
+    const regenPlaying = p.playing;
+    const dropped = p.graph.cap.dropped;
+    p.stop();
+    await p.close();
+    return { atStart, afterSeek, afterLateSeek, stillPlaying, afterRegen, sameContext, regenPlaying, dropped, posAfterSeek };
+  });
+  check('seeking keeps the master audible', resilience.afterSeek > 0.05, `gain ${resilience.afterSeek.toFixed(3)}`);
+  check('seeking near the end does not go silent', resilience.afterLateSeek > 0.05, `gain ${resilience.afterLateSeek.toFixed(3)}`);
+  check('still playing after a late seek', resilience.stillPlaying);
+  check('eight regenerations reuse one AudioContext', resilience.sameContext);
+  check('still audible after eight regenerations', resilience.afterRegen > 0.05, `gain ${resilience.afterRegen.toFixed(3)}`);
+  check('regenerated songs keep playing', resilience.regenPlaying);
+  check('nothing dropped during the churn', resilience.dropped === 0, `${resilience.dropped} dropped`);
+
   console.log('\n"None" in the dropdowns');
   const noneOpts = await page.evaluate(() => {
     const out = {};
@@ -666,6 +714,25 @@ try {
   check('a fixed seed plays and is marked', seeds.pressed === 1, `${seeds.pressed} pressed`);
   check('fixed seed updates the specimen', /128 BPM/.test(seeds.meta || ''), seeds.meta);
 
+  // the landing page must survive regenerate + seed switching while playing
+  const landingLive = await page.evaluate(async () => {
+    const playBtn = document.getElementById('spec-play');
+    const next = document.getElementById('spec-next');
+    const seedsEl = document.querySelectorAll('#seeds button');
+    const isPlaying = () => playBtn.textContent.includes('Pause');
+    if (!isPlaying()) playBtn.click();          // it may already be playing from the seed test
+    await new Promise((r) => setTimeout(r, 900));
+    const wasPlaying = isPlaying();
+    next.click();
+    await new Promise((r) => setTimeout(r, 900));
+    if (seedsEl[2]) seedsEl[2].click();
+    await new Promise((r) => setTimeout(r, 900));
+    const stillPlaying = isPlaying();
+    return { wasPlaying, stillPlaying, label: playBtn.textContent };
+  });
+  check('landing plays', landingLive.wasPlaying, landingLive.label);
+  check('landing keeps playing across regenerate and seed switches', landingLive.stillPlaying, landingLive.label);
+
   console.log('\nInteractions');
   // the browser can detach a frame under load; one retry keeps the suite honest
   async function gotoStudio() {
@@ -704,6 +771,23 @@ try {
   try { jazzMeta = await page.$eval('#meta', (el) => el.textContent); } catch { await gotoStudio(); }
   check('style change regenerates', jazzMeta.includes('Jazz'), jazzMeta);
   check('no console errors after interaction', errors.length === 0, errors.slice(0, 3).join(' | '));
+
+  // regenerate through the UI while playing: it must keep playing
+  const uiLive = await page.evaluate(async () => {
+    const { state } = await import('./src/state.js');
+    document.getElementById('play').click();
+    await new Promise((r) => setTimeout(r, 900));
+    const before = document.querySelector('#play').textContent.includes('⏸');
+    document.getElementById('generate').click();
+    await new Promise((r) => setTimeout(r, 1400));
+    const gain = globalThis.__musicgen?.app?.player?.graph?.master?.gain?.value ?? null;
+    const playing = document.querySelector('#play').textContent.includes('⏸');
+    const pos = globalThis.__musicgen?.app?.player?.position ?? -1;
+    return { before, playing, gain, pos, song: !!state.song };
+  });
+  check('the UI was playing before regenerating', uiLive.before);
+  check('regenerating from the UI keeps playing', uiLive.playing);
+  check('and the master is still open', uiLive.gain === null || uiLive.gain > 0.05, String(uiLive.gain));
 
   await page.screenshot({ path: path.join(ROOT, 'tests', 'browser', 'screenshot.png'), fullPage: true });
 } finally {

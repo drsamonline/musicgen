@@ -10,8 +10,7 @@ import { syncControls } from './dials.js';
 
 // ------------------------------------------------------------- playback
 export function ensurePlayer() {
-  if (!app.player || app.player.song !== state.song) {
-    if (app.player) app.player.close();
+  if (!app.player) {
     app.player = new Player(state.song);
     app.player.onTick = (pos) => {
       els.progressbar.style.width = `${Math.min(100, (pos / Math.max(0.001, state.song.durationSec)) * 100)}%`;
@@ -29,7 +28,24 @@ export function applyVolume() {
 
 export async function play() {
   ensurePlayer();
-  await app.player.play();
+  try {
+    // swap the song inside the same context first, and await it: scheduling
+    // into a graph that is about to be replaced is how a regenerate goes silent
+    if (app.player.song !== state.song) await app.player.setSong(state.song);
+    await app.player.play();
+  } catch (err) {
+    // A closed or exhausted AudioContext is unrecoverable in place; build a
+    // fresh player once and try again rather than leaving the app silent.
+    console.warn('[musicgen] playback failed, rebuilding the audio context', err);
+    try { await app.player.close(); } catch { /* noop */ }
+    app.player = new Player(state.song);
+    app.player.onTick = (pos) => {
+      els.progressbar.style.width = `${Math.min(100, (pos / Math.max(0.001, state.song.durationSec)) * 100)}%`;
+      markSection(pos);
+    };
+    app.player.onEnd = () => { els.play.textContent = '▶'; stopRaf(); releaseWakeLock(); };
+    await app.player.play();
+  }
   applyVolume();
   els.play.textContent = '⏸';
   startRaf();

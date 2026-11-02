@@ -4,6 +4,7 @@ Generated from the commit history by `npm run changelog`.
 
 ## 2026-11-02
 
+- feat: 'None' on every dial, and an Ambience control of its own (v4.2.0) (`4cf27d1`)
 - perf: schedule off the audio thread, cache the visualisers; design pass (v4.1.0) (`b1d577b`)
 - refactor: split the UI into modules; licence to PolyForm Noncommercial (v4.0.0) (`95aa38e`)
 - fix: the end-of-song click; feat: ambient textures and section risers (v3.1.0) (`c57fa89`)

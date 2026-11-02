@@ -27,6 +27,29 @@ export class Player {
     this.watchdog = null;
   }
 
+  // Regenerating used to create a whole new Player — and therefore a new
+  // AudioContext — which browsers cap at a handful. After a few regenerations
+  // the constructor threw and the app went permanently silent. Swapping the
+  // song inside the existing context avoids that entirely.
+  async setSong(song) {
+    const wasPlaying = this.playing;
+    const position = this.position;
+    this.stop();
+    this.song = song;
+    this.events = buildEvents(song);
+    this.idx = 0;
+    this.startPos = 0;
+    this.loop = null;
+    if (!this.ctx) return;
+    try { this.graph?.master?.disconnect(); } catch { /* already gone */ }
+    try { this.graph?.chain?.output?.disconnect(); } catch { /* already gone */ }
+    this.graph = buildGraph(this.ctx, song);
+    this.schedule = makeScheduler(this.graph, song);
+    if (wasPlaying) {
+      await this.play(Math.min(position, Math.max(0, song.durationSec - 1)));
+    }
+  }
+
   async init() {
     if (this.ctx) return;
     const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
@@ -94,29 +117,54 @@ export class Player {
   // last 140 ms (and again at every loop wrap), and fade in at the start.
   scheduleEdges() {
     const g = this.graph.master.gain;
-    const base = (this.userVolume ?? 0.9) * 0.32;
+    const base = this.baseGain();
     const now = this.ctx.currentTime;
     try {
       g.cancelScheduledValues(now);
-      g.setValueAtTime(0.0001, now);
-      g.linearRampToValueAtTime(base, now + 0.02);
+      // Always come back up immediately: this is the line that un-silences a
+      // seek or a regenerate.
+      g.setValueAtTime(base * 0.35, now);
+      g.linearRampToValueAtTime(base, now + 0.03);
 
       const end = this.song.durationSec;
       const fadeStart = this.startCtxTime + Math.max(0, end - this.startPos) - 0.14;
-      if (fadeStart > now + 0.05) {
+      // Only schedule the closing fade if it is comfortably in the future —
+      // a seek near the end used to schedule it in the past and go silent.
+      if (fadeStart > now + 0.4) {
         g.setValueAtTime(base, fadeStart);
         g.linearRampToValueAtTime(0.0001, fadeStart + 0.14);
       }
       if (this.loop) {
         const loopEnd = this.startCtxTime + (this.loop.end - this.startPos) - 0.12;
         const loopStart = this.startCtxTime + (this.loop.start - this.startPos) + 0.02;
-        if (loopEnd > now + 0.05) {
+        if (loopEnd > now + 0.4) {
           g.setValueAtTime(base, loopEnd);
           g.linearRampToValueAtTime(0.0001, loopEnd + 0.1);
           g.setValueAtTime(base, Math.max(loopEnd + 0.11, loopStart));
         }
       }
     } catch { /* automation is best-effort */ }
+  }
+
+  baseGain() {
+    return (this.userVolume ?? 0.9) * 0.32;
+  }
+
+  // Belt and braces: if the master has somehow been left at silence while the
+  // transport says it is playing, put it back. Cheap, and it turns a silent
+  // app into a blip.
+  ensureAudible() {
+    if (!this.playing || !this.graph?.master) return;
+    const now = this.ctx.currentTime;
+    if (this.ctx.currentTime + 0.3 > this.startCtxTime + (this.song.durationSec - this.startPos)) return;
+    const g = this.graph.master.gain;
+    if (g.value < this.baseGain() * 0.15) {
+      try {
+        g.cancelScheduledValues(now);
+        g.setValueAtTime(this.baseGain() * 0.5, now);
+        g.linearRampToValueAtTime(this.baseGain(), now + 0.05);
+      } catch { /* noop */ }
+    }
   }
 
   // If the timer is throttled (background tab, busy thread) the song would
@@ -140,6 +188,7 @@ export class Player {
   tick() {
     if (!this.playing) return;
     this.lastTick = Date.now();
+    this.ensureAudible();
     const now = this.ctx.currentTime - this.startCtxTime; // song time at "now"
     const horizon = now + this.lookahead;
 
@@ -204,7 +253,7 @@ export class Player {
     if (!this.graph || !this.ctx) return;
     const g = this.graph.master.gain;
     const now = this.ctx.currentTime;
-    const target = silent ? 0.0001 : this.userVolume * 0.32;
+    const target = silent ? 0.0001 : this.baseGain();
     try {
       g.cancelScheduledValues(now);
       g.setTargetAtTime(target, now, 0.015);

@@ -130,6 +130,7 @@ async function boot() {
     }
   }
 
+  globalThis.__musicgen = { app, state };
   applyTheme(state.ui.theme || 'system', { redraw: false });
   generate();
 

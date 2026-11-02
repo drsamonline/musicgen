@@ -27,6 +27,8 @@ export const els = {
 
 // Everything that changes at runtime lives here, so modules can share it
 // without a framework and without circular `let` bindings.
+// `window.__musicgen` is a deliberate debug handle: it lets the test harness
+// (and a curious listener with devtools) inspect the live player.
 export const app = {
   player: null,
   rafId: null,

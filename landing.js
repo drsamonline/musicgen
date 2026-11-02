@@ -163,12 +163,11 @@ async function playFixed(index) {
     stopRaf();
   }
   song = compose(SEED_PRESETS[index], FIXED_SEEDS[index]);
+  // Swap the song inside the existing AudioContext. Creating a Player per
+  // seed used to burn through the browser's AudioContext budget and leave the
+  // page silent after a few presses.
   if (!player) player = new Player(song);
-  else {
-    // a new song needs a new graph
-    await player.close();
-    player = new Player(song);
-  }
+  else await player.setSong(song);
   setMeta();
   draw(0);
   markSeed(index);

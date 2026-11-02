@@ -10,7 +10,7 @@ import { MOODS } from '../presets/moods.js';
 import { els, app, toast, fail } from './ctx.js';
 import { drawViz } from './visuals.js';
 import { syncControls } from './dials.js';
-import { updateMediaSession } from './transport.js';
+import { updateMediaSession, play } from './transport.js';
 
 export function snapshot() {
   return JSON.parse(JSON.stringify(state.presets));
@@ -45,7 +45,7 @@ export function redo() {
 // ------------------------------------------------------------- generate
 export function generate({ keepPosition = false, announce = true } = {}) {
   const wasPlaying = app.player?.playing;
-  if (wasPlaying) pause();
+  if (wasPlaying) { app.player.pause(); els.play.textContent = '▶'; }
   try {
     const t0 = performance.now();
     state.song = compose(state.presets, state.seed);

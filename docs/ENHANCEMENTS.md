@@ -176,6 +176,15 @@ Status key: `[ ]` not started · `[~]` partial · `[x]` done in the current buil
 
 ---
 
+## What v4.3.0 closed
+
+- **"Seek or regenerate goes silent" — three separate causes**, all found by instrumenting the player rather than guessing:
+  1. `generate()` called `play()` without importing it (a casualty of the v4.0 UI split), so every regenerate threw *after* pausing: `TypeError: play is not a function`.
+  2. Every regenerate built a new `Player`, hence a new `AudioContext`; browsers cap those at a handful, so after several regenerations the constructor threw and the app never played again. `Player.setSong()` now swaps the graph inside the existing context.
+  3. Seeking near the end scheduled the closing fade *behind* the playhead — the master faded to silence with nothing to restore it. The fade is now only scheduled if it is comfortably in the future.
+- **A safety net:** `ensureAudible()` runs on every scheduler tick and restores the master if it is ever left at silence while the transport says it is playing.
+- **Seven new browser tests** cover seek at 60%, seek at 97%, eight regenerations in a row (asserting one shared AudioContext), a regenerate through the UI, and the landing page's seed switching.
+
 ## What v4.2.0 closed
 
 - **"None" on every dial.** Style, mood, theme, technology and type each have a plain option that still composes something real: no genre baggage (a plain four-on-the-floor and one progression), no emotional bias, no theme (no ambience, neutral palette, plain titles), clean sine tones, and a single continuous section. Random never picks them — they are a deliberate choice, not a surprise.

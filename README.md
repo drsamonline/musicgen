@@ -77,7 +77,7 @@ npm run audit
 
 ```bash
 npm test              # 47 unit tests, no browser needed
-npm run test:browser  # 104 tests in real Chromium with real Web Audio
+npm run test:browser  # 116 tests in real Chromium with real Web Audio
 npm run lint          # determinism lint: no Math.random / Date.now in pure modules
 npm run budget        # shell size, precache completeness, no external requests
 npm run visual        # pixel-diff the studio against committed baselines
@@ -106,6 +106,15 @@ The suite asserts, rather than claims:
 ## Mix balance (why it sounds like a mix)
 
 Per-track loudness is measured, not eyeballed: the drum bus has its own compressor, every track has a measured trim, and `npm run test:browser` renders each track solo and fails if anything is buried more than 18 dB or if the bass sits more than 12 dB over the drums. That test exists because the bass *did* sit 18 dB over the drums in v2.2.0, and it was the difference between "a song" and "a bass solo".
+
+## Playback resilience
+
+Seeking, regenerating and switching seeds are all covered by tests, because each one used to be able to leave the app silent:
+
+- **A regenerate reuses the AudioContext.** It used to build a new `Player` — and therefore a new `AudioContext` — every time, and browsers cap those at a handful; after a few regenerations the constructor threw and nothing played again. `Player.setSong()` swaps the graph inside the existing context.
+- **The closing fade cannot fire in the past.** Seeking near the end used to schedule the end-of-song fade *behind* the playhead, which faded the master to silence with nothing to bring it back.
+- **`ensureAudible()` on every tick.** If the master is ever left at silence while the transport says it's playing, it is restored — a safety net that turns a dead app into a blip.
+- **`play` is imported where it's used.** The one-line cause of "regenerate goes silent": after the UI split, `generate()` called `play()` without importing it, so every regenerate threw `TypeError: play is not a function` *after* pausing. The suite now asserts playback survives a regenerate, a seek to 97%, eight regenerations in a row, and the landing page's seed switching.
 
 ## Performance: why it stopped stuttering
 
