@@ -48,7 +48,7 @@ export const app = {
   history: { past: [], future: [] },
 };
 
-export const VIZ_MODES = ['roll', 'bars', 'wave', 'art'];
+export const VIZ_MODES = ['roll', 'grid', 'bars', 'wave', 'art'];
 export const THEME_MODES = ['system', 'light', 'dark'];
 export const THEME_GLYPH = { system: '◐', light: '☀', dark: '☾' };
 

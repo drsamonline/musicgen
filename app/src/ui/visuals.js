@@ -4,6 +4,7 @@ import { state, persist, emit } from '../state.js';
 import {
   drawPianoRoll, drawBars, drawWaveform, drawArt, invalidatePalette, beatAtX, noteAt,
 } from '../visual/pianoRoll.js';
+import { drawTracker } from '../visual/tracker.js';
 import { synthVoice } from '../audio/instruments.js';
 import { freqOf } from '../core/theory.js';
 import { els, app, VIZ_MODES, THEME_MODES, THEME_GLYPH, toast, fail } from './ctx.js';
@@ -42,7 +43,8 @@ export function cycleTheme() {
 export function drawViz(posSec = 0) {
   if (!state.song) return;
   const analyser = app.player?.graph?.analyser ?? null;
-  if (app.vizMode === 'bars') drawBars(els.viz, analyser);
+  if (app.vizMode === 'grid') drawTracker(els.viz, state.song, posSec);
+  else if (app.vizMode === 'bars') drawBars(els.viz, analyser);
   else if (app.vizMode === 'wave') drawWaveform(els.viz, analyser);
   else if (app.vizMode === 'art') drawArt(els.viz, state.song, analyser, app.artClock);
   else drawPianoRoll(els.viz, state.song, posSec, app.view);
