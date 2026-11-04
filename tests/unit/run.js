@@ -19,6 +19,7 @@ import { extractTheme, parseMidi } from '../../app/src/import/midi.js';
 import { randomPresets } from '../../app/src/presets/compatibility.js';
 import { zipStore, crc32 } from '../../app/src/export/zip.js';
 import { songToXm, cycleWave, drumSample } from '../../app/src/export/xm.js';
+import { PAD_ACTIONS, PAD_LABELS, makePadReader, midiMessageToAction } from '../../app/src/ui/controllers.js';
 import { makeHealth, noteTick, noteEvent, noteSkip, noteRecovery, report, verdict, LATE_MS, STALL_MS } from '../../app/src/audio/health.js';
 import { noteLabel, cellLabel, buildStepIndex, rowsFor, windowFor, TRACK_COLUMNS, STEPS_PER_BEAT } from '../../app/src/visual/tracker.js';
 
@@ -991,6 +992,78 @@ test('a different song makes a different module', () => {
   const y = parseXm(b);
   eq(y.bpm, 128);
   eq(y.sig, 'Extended Module: ');
+});
+
+
+// ------------------------------------------------------------ controllers
+const fakePad = (index, pressed) => ({
+  index,
+  buttons: pressed.map((p) => ({ pressed: !!p, value: p ? 1 : 0 })),
+});
+
+test('the gamepad map covers the buttons it claims to', () => {
+  eq(PAD_ACTIONS[0], 'play');
+  eq(PAD_ACTIONS[1], 'generate');
+  eq(PAD_ACTIONS[9], 'ab');
+  assert(Object.keys(PAD_ACTIONS).every((k) => Number(k) >= 0 && Number(k) <= 9), 'only the ten standard buttons');
+  for (const action of Object.values(PAD_ACTIONS)) {
+    assert(PAD_LABELS[action], `every action has a label: ${action}`);
+  }
+});
+
+test('a held button fires once, not every frame', () => {
+  const read = makePadReader();
+  const down = fakePad(0, [1, 0, 0, 0]);
+  eq(read(down).join(','), 'play', 'the press fires');
+  eq(read(down).join(','), '', 'holding it does not repeat');
+  eq(read(down).join(','), '', 'still not');
+  eq(read(fakePad(0, [0, 0, 0, 0])).join(','), '', 'the release is silent');
+  eq(read(down).join(','), 'play', 'and a second press fires again');
+});
+
+test('two pads do not share their held state', () => {
+  const read = makePadReader();
+  eq(read(fakePad(0, [1, 0, 0, 0])).join(','), 'play');
+  eq(read(fakePad(1, [1, 0, 0, 0])).join(','), 'play', 'pad 1 has its own buttons');
+  eq(read(fakePad(0, [1, 0, 0, 0])).join(','), '', 'and pad 0 is still held');
+});
+
+test('several buttons at once fire in button order', () => {
+  const read = makePadReader();
+  eq(read(fakePad(0, [0, 1, 0, 1])).join(','), 'generate,evolve');
+});
+
+test('an unmapped button does nothing, and a missing pad is safe', () => {
+  const read = makePadReader();
+  eq(read(fakePad(0, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1])).join(','), '', 'buttons past the map are ignored');
+  eq(read(null).join(','), '');
+  eq(read({}).join(','), '');
+});
+
+test('a half-pressed trigger counts as pressed', () => {
+  const read = makePadReader();
+  const pad = { index: 0, buttons: [{ pressed: false, value: 0.9 }] };
+  eq(read(pad).join(','), 'play', 'value past the threshold fires');
+});
+
+test('MIDI messages decode to actions', () => {
+  eq(midiMessageToAction([0x90, 60, 100]).type, 'noteon');
+  eq(midiMessageToAction([0x90, 60, 100]).note, 60);
+  assert(Math.abs(midiMessageToAction([0x90, 60, 127]).velocity - 1) < 1e-9, 'full velocity');
+  eq(midiMessageToAction([0x80, 60, 0]).type, 'noteoff');
+  eq(midiMessageToAction([0x90, 60, 0]).type, 'noteoff', 'note-on with zero velocity is a release');
+  eq(midiMessageToAction([0xb0, 7, 64]).type, 'volume');
+  assert(Math.abs(midiMessageToAction([0xb0, 7, 127]).value - 1) < 1e-9);
+  eq(midiMessageToAction([0xb0, 1, 64]).type, 'mod');
+  eq(midiMessageToAction([0xc0, 5]), null, 'program change is not ours');
+  eq(midiMessageToAction([0x90]), null, 'a truncated message is refused');
+  eq(midiMessageToAction(null), null);
+});
+
+test('MIDI on any channel is accepted', () => {
+  for (const ch of [0, 5, 9, 15]) {
+    eq(midiMessageToAction([0x90 | ch, 64, 90]).type, 'noteon', `channel ${ch + 1}`);
+  }
 });
 
 console.log(`\n${pass} passed, ${failures.length} failed\n`);
