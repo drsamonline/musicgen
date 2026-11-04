@@ -954,3 +954,8 @@ a:focus-visible,
 .health-body dt { color: var(--muted); }
 .health-body dd { margin: 0; font-variant-numeric: tabular-nums; color: var(--text); }
 .health-actions { display: flex; gap: 8px; margin: 14px 0 10px; flex-wrap: wrap; }
+
+/* five visualiser pills, not four: tighten them rather than let the row wrap */
+@media (max-width: 420px) {
+  .vizmodes button { padding: 1px 6px; font-size: 9px; letter-spacing: 0.03em; }
+}

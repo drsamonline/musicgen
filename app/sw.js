@@ -1,6 +1,6 @@
 // Service worker: cache-first app shell. There are no runtime assets to
 // fetch, so a full precache means the app is genuinely offline.
-const VERSION = 'musicgen-v18';
+const VERSION = 'musicgen-v19';
 const SHELL = [
   './',
   'index.html',
@@ -54,6 +54,7 @@ const SHELL = [
   'src/import/midi.js',
   'src/export/artwork.js',
   'src/visual/pianoRoll.js',
+  'src/visual/tracker.js',
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/maskable-512.png',

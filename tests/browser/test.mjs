@@ -641,7 +641,7 @@ try {
   await wait(200);
 
   console.log('\nVisualiser modes');
-  for (const mode of ['bars', 'wave', 'art', 'roll']) {
+  for (const mode of ['grid', 'bars', 'wave', 'art', 'roll']) {
     await page.click(`[data-viz="${mode}"]`);
     await new Promise((r) => setTimeout(r, 150));
     const pressed = await page.$eval(`[data-viz="${mode}"]`, (el) => el.getAttribute('aria-pressed'));
@@ -655,6 +655,37 @@ try {
     return nonEmpty;
   });
   check('canvas has pixels drawn', painted > 0, `${painted} sampled opaque pixels`);
+
+  // the tracker view is a different reading of the same song, so it gets a
+  // check of its own: rows advance with the playhead, and the columns are there
+  const tracker = await page.evaluate(async () => {
+    const { state } = await import('./src/state.js');
+    const { buildStepIndex, rowsFor, windowFor } = await import('./src/visual/tracker.js');
+    document.querySelector('[data-viz="grid"]').click();
+    await new Promise((r) => setTimeout(r, 250));
+    const c = document.getElementById('viz');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let opaque = 0;
+    for (let i = 3; i < d.length; i += 400) if (d[i] > 0) opaque++;
+    const index = buildStepIndex(state.song);
+    const a = windowFor(state.song, 4, 9);
+    const b = windowFor(state.song, 9, 9);
+    const rows = rowsFor(index, a.firstStep, 9);
+    return {
+      painted: opaque,
+      mode: globalThis.__musicgen.app.vizMode,
+      scrolls: b.firstStep > a.firstStep,
+      cells: rows.filter((r) => Object.values(r.cells).some(Boolean)).length,
+      columns: Object.keys(rows[0].cells).length,
+      labels: rows.flatMap((r) => Object.values(r.cells)).filter(Boolean).slice(0, 3),
+    };
+  });
+  check('the grid mode draws', tracker.mode === 'grid' && tracker.painted > 0, `${tracker.painted} pixels`);
+  check('it has a column per track', tracker.columns === 4, `${tracker.columns} columns`);
+  check('and rows that carry notes', tracker.cells > 0, `${tracker.cells} of 9 rows have notes`);
+  check('notes are written as tracker labels', tracker.labels.every((l) => /^[A-G][-#]\d$/.test(l)), tracker.labels.join(' '));
+  check('the view scrolls with the song', tracker.scrolls);
+  await page.evaluate(() => document.querySelector('[data-viz="roll"]').click());
 
   console.log('\nStems + zip');
   const stems = await page.evaluate(async () => {

@@ -19,6 +19,7 @@ import { extractTheme, parseMidi } from '../../app/src/import/midi.js';
 import { randomPresets } from '../../app/src/presets/compatibility.js';
 import { zipStore, crc32 } from '../../app/src/export/zip.js';
 import { makeHealth, noteTick, noteEvent, noteSkip, noteRecovery, report, verdict, LATE_MS, STALL_MS } from '../../app/src/audio/health.js';
+import { noteLabel, cellLabel, buildStepIndex, rowsFor, windowFor, TRACK_COLUMNS, STEPS_PER_BEAT } from '../../app/src/visual/tracker.js';
 
 let pass = 0;
 const failures = [];
@@ -726,6 +727,88 @@ test('a stall outranks everything', () => {
     voices: { active: 0, max: 32, stolen: 0, dropped: 0 },
   });
   eq(v.level, 'bad');
+});
+
+
+// ---------------------------------------------------------------- tracker
+test('notes are written the way a tracker writes them', () => {
+  eq(noteLabel(60), 'C-4');
+  eq(noteLabel(61), 'C#4');
+  eq(noteLabel(69), 'A-4');
+  eq(noteLabel(21), 'A-0');
+  eq(noteLabel(0), 'C--1');
+  eq(noteLabel(127), 'G-9', 'top of the range');
+  eq(noteLabel(60).length, 3, 'three characters, so a column lines up');
+  eq(noteLabel(undefined), '···');
+});
+
+test('the step index buckets every note on its sixteenth', () => {
+  const song = {
+    beatsPerBar: 4, bpm: 120, tempo: { segments: [{ beat: 0, bpm: 120 }], base: 120, drift: 0 },
+    tracks: {
+      drums: [{ t: 0, drum: 'kick', v: 0.9 }, { t: 1, drum: 'snare', v: 0.8 }, { t: 0.25, drum: 'hat', v: 0.4 }],
+      bass: [{ t: 0, p: 40 }], chords: [], lead: [{ t: 2.5, p: 72 }], pad: [], arp: [], bed: [],
+    },
+  };
+  const idx = buildStepIndex(song);
+  eq(idx.step, 0.25);
+  eq(idx.map.get(0).drums.length, 1, 'one note on step 0');
+  eq(idx.map.get(1).drums[0].drum, 'hat', 'the sixteenth hat lands on step 1');
+  eq(idx.map.get(4).drums[0].drum, 'snare', 'beat 2 is step 4');
+  eq(idx.map.get(10).lead[0].p, 72, 'beat 3.5 is step 10');
+  eq(idx.map.get(0).bass.length, 1);
+});
+
+test('rows line up with the columns they belong to', () => {
+  const song = {
+    beatsPerBar: 4, bpm: 120, tempo: { segments: [{ beat: 0, bpm: 120 }], base: 120, drift: 0 },
+    tracks: {
+      drums: [{ t: 0, drum: 'kick', v: 0.9 }], bass: [], chords: [{ t: 0.25, p: 48 }], lead: [],
+      pad: [], arp: [], bed: [],
+    },
+  };
+  const idx = buildStepIndex(song);
+  const rows = rowsFor(idx, 0, 4);
+  eq(rows.length, 4);
+  eq(rows[0].cells.drums, 'kck', 'a drum prints its voice, not a pitch');
+  eq(rows[0].cells.chords, null, 'silence is null, not a note');
+  eq(rows[1].cells.chords, 'C-3');
+  eq(rows[2].cells.drums, null);
+  eq(Object.keys(rows[0].cells).join(','), TRACK_COLUMNS.join(','), 'one cell per column');
+  eq(rows[1].beat, 0.25);
+});
+
+test('the window scrolls so the row being heard sits a third down', () => {
+  const song = {
+    beatsPerBar: 4, bpm: 60, tempo: { segments: [{ beat: 0, bpm: 60 }], base: 60, drift: 0 },
+    tracks: { drums: [], bass: [], chords: [], lead: [], pad: [], arp: [], bed: [] },
+  };
+  // 60 bpm: one beat per second, so 8 s is beat 8 = step 32
+  const w = windowFor(song, 8, 9);
+  eq(w.currentStep, 32);
+  eq(w.firstStep, 32 - Math.max(1, Math.round(9 * 0.34)));
+  const atStart = windowFor(song, 0, 9);
+  eq(atStart.firstStep, 0, 'never scrolls above the first row');
+  assert(atStart.currentStep === 0);
+});
+
+test('a sixteenth at 120 bpm is where the index says it is', () => {
+  // 120 bpm -> 0.5 s per beat -> 0.125 s per sixteenth
+  const song = {
+    beatsPerBar: 4, bpm: 120, tempo: { segments: [{ beat: 0, bpm: 120 }], base: 120, drift: 0 },
+    tracks: { drums: [], bass: [], chords: [], lead: [], pad: [], arp: [], bed: [] },
+  };
+  eq(windowFor(song, 0.125, 9).currentStep, 1);
+  eq(windowFor(song, 0.5, 9).currentStep, 4);
+  eq(STEPS_PER_BEAT, 4);
+});
+
+test('a stacked drum step says so instead of dropping the second hit', () => {
+  eq(cellLabel('drums', [{ drum: 'kick', v: 0.9 }, { drum: 'hat', v: 0.4 }]), 'kck+', 'loudest wins, stack marked');
+  eq(cellLabel('drums', [{ drum: 'hat', v: 0.2 }, { drum: 'snare', v: 0.8 }]), 'snr+');
+  eq(cellLabel('drums', [{ drum: 'tom', v: 0.5 }]), 'tom');
+  eq(cellLabel('drums', []), null);
+  eq(cellLabel('lead', [{ p: 72 }]), 'C-5', 'pitched tracks still print pitches');
 });
 
 console.log(`\n${pass} passed, ${failures.length} failed\n`);
