@@ -226,6 +226,7 @@
     <button data-act="install">Install app</button>
     <button data-act="help">Keyboard shortcuts</button>
     <button data-act="health">Audio health</button>
+    <button data-act="controllers">Controllers — gamepad, MIDI</button>
     <button data-act="close">Close</button>
   </div>
 
@@ -248,6 +249,27 @@
       <dt>Esc</dt><dd>Stop</dd>
       <dt>?</dt><dd>This dialog</dd>
     </dl>
+    <form method="dialog"><button>Close</button></form>
+  </dialog>
+
+  <dialog id="controllers-dialog">
+    <h2>Controllers</h2>
+    <p class="dialog-note">Play the studio from a gamepad or a MIDI keyboard. Nothing is read from a device
+      until you connect it here.</p>
+    <div class="row">
+      <label>MIDI</label>
+      <button id="midi-connect">Connect a MIDI keyboard</button>
+    </div>
+    <ul id="midi-list" class="device-list" aria-live="polite"></ul>
+    <div class="row">
+      <label>Gamepad</label>
+      <span id="pad-status" class="device-note">None detected — press a button to wake one.</span>
+    </div>
+    <div class="padmap">
+      <span class="padmap-head">Buttons</span>
+      <dl id="pad-map" class="padmap-body"></dl>
+    </div>
+    <p class="dialog-note">MIDI notes audition the lead sound. Mod wheel and volume CCs are ignored for now.</p>
     <form method="dialog"><button>Close</button></form>
   </dialog>
 

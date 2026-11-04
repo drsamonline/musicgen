@@ -959,3 +959,36 @@ a:focus-visible,
 @media (max-width: 420px) {
   .vizmodes button { padding: 1px 6px; font-size: 9px; letter-spacing: 0.03em; }
 }
+
+/* ------------------------------------------------------------ controllers
+   The device list and the button map: plain, monospaced where it is a table. */
+.device-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+}
+.device-list li {
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.device-note { font-size: 0.78rem; color: var(--muted); }
+.padmap { margin: 12px 0 4px; }
+.padmap-head { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.padmap-body {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 16px;
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+}
+.padmap-body dt { color: var(--muted); font-family: var(--mono); }
+.padmap-body dd { margin: 0; color: var(--text); }
+
+/* --dim is 3.94:1 on a dialog's panel colour, which is under AA for small text.
+   Inside the controllers dialog, labels use the next step up. */
+#controllers-dialog .row label { color: var(--muted); }

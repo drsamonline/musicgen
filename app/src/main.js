@@ -5,10 +5,11 @@ import { DEFAULT_PRESETS, normalisePresets, normalisePlan } from './core/compose
 import { decodeShare } from './export/artwork.js';
 import { wirePlan, renderPlanPanel, sourceOf } from './ui/plan.js';
 import { openHealth, closeHealth, rebuildAudio, resetHealth } from './ui/health.js';
+import { startGamepads, stopGamepads, connectMidi, listPads, listMidiInputs, midiConnected, PAD_ACTIONS, PAD_LABELS } from './ui/controllers.js';
 import { els, app, $, toast, notice, fail, VIZ_MODES, THEME_MODES } from './ui/ctx.js';
 import { buildSelects, syncControls, wirePresets, renderGroove, toggleMute, doRandom, doEvolve, doMutate } from './ui/dials.js';
 import { generate, renderMeta, renderSections, renderSummary } from './ui/generate.js';
-import { ensurePlayer, play, pause, stop, toggleLoop, toggleAB, applyVolume, wireInstall, markOfflineReady, zoomRoll } from './ui/transport.js';
+import { ensurePlayer, play, pause, stop, toggleLoop, toggleAB, applyVolume, wireInstall, markOfflineReady, zoomRoll, auditionNote } from './ui/transport.js';
 import { applyTheme, cycleTheme, setVizMode, wireRoll, stopRaf } from './ui/visuals.js';
 import {
   exportWav, exportStems, exportMidi, exportJson, importJson, exportArt, doShare, doSave,
@@ -48,6 +49,7 @@ function wireActions() {
     if (act === 'redo') redo();
     if (act === 'library') openLibrary();
     if (act === 'health') openHealth();
+    if (act === 'controllers') openControllers();
     if (act === 'exportlib') exportLibrary();
     if (act === 'record') toggleRecord();
     if (act === 'importmidi') els.midiinput.click();
@@ -131,6 +133,85 @@ async function applySharedLink(encoded) {
   return decoded;
 }
 
+// ------------------------------------------------------- controllers
+// A gamepad and a MIDI keyboard both end up here, calling the same functions
+// the buttons call. Nothing gets a second implementation.
+function nudgeVolume(delta) {
+  const next = Math.max(0, Math.min(1.5, Math.round(((state.ui.volume ?? 0.9) + delta) * 100) / 100));
+  state.ui.volume = next;
+  applyVolume();
+  persist();
+  syncControls();
+}
+
+function runPadAction(name) {
+  switch (name) {
+    case 'play': if (app.player?.playing) pause(); else play(); break;
+    case 'generate': generate(); break;
+    case 'random': doRandom(); break;
+    case 'evolve': doEvolve(); break;
+    case 'mutate': doMutate(); break;
+    case 'vizNext': setVizMode(VIZ_MODES[(VIZ_MODES.indexOf(app.vizMode) + 1) % VIZ_MODES.length]); break;
+    case 'volumeDown': nudgeVolume(-0.05); break;
+    case 'volumeUp': nudgeVolume(0.05); break;
+    case 'loop': toggleLoop(); break;
+    case 'ab': toggleAB(); break;
+    default: break;
+  }
+}
+
+function onMidiAction(a) {
+  if (a.type === 'noteon') auditionNote({ p: a.note, track: 'lead', v: a.velocity });
+  else if (a.type === 'volume') {
+    state.ui.volume = Math.max(0, Math.min(1.5, a.value * 1.5));
+    applyVolume();
+  }
+}
+
+function renderControllers() {
+  if (!els.padStatus) return;
+  const pads = listPads();
+  els.padStatus.textContent = pads.length
+    ? pads.map((p) => p.id || `gamepad ${p.index}`).join(', ')
+    : 'None detected — press a button to wake one.';
+
+  const inputs = listMidiInputs();
+  els.midiList.textContent = '';
+  if (!inputs.length) {
+    const li = document.createElement('li');
+    li.className = 'device-note';
+    li.textContent = midiConnected() ? 'No MIDI inputs found.' : 'Not connected.';
+    els.midiList.append(li);
+  } else {
+    for (const input of inputs) {
+      const li = document.createElement('li');
+      li.textContent = input.manufacturer ? `${input.name} — ${input.manufacturer}` : input.name;
+      els.midiList.append(li);
+    }
+  }
+}
+
+function renderPadMap() {
+  if (!els.padMap) return;
+  els.padMap.textContent = '';
+  for (const [button, action] of Object.entries(PAD_ACTIONS)) {
+    const dt = document.createElement('dt');
+    dt.textContent = `Button ${button}`;
+    const dd = document.createElement('dd');
+    dd.textContent = PAD_LABELS[action] || action;
+    els.padMap.append(dt, dd);
+  }
+}
+
+function openControllers() {
+  renderControllers();
+  renderPadMap();
+  // polling only starts when someone opens this dialog
+  startGamepads(runPadAction, { onChange: renderControllers });
+  if (typeof els.controllersDialog.showModal === 'function') els.controllersDialog.showModal();
+  else els.controllersDialog.hidden = false;
+}
+
 // ------------------------------------------------------------- boot
 async function boot() {
   loadState();
@@ -142,6 +223,23 @@ async function boot() {
   wireRoll();
   wireInstall();
   wirePlan();
+  els.midiConnect?.addEventListener('click', async () => {
+    try {
+      els.midiConnect.disabled = true;
+      els.midiConnect.textContent = 'Waiting for permission…';
+      const inputs = await connectMidi(onMidiAction, { onChange: renderControllers });
+      els.midiConnect.textContent = inputs.length ? 'Reconnect' : 'Connect a MIDI keyboard';
+      els.midiConnect.disabled = false;
+      renderControllers();
+      toast(inputs.length ? `${inputs.length} MIDI input${inputs.length === 1 ? '' : 's'} connected` : 'No MIDI inputs found');
+    } catch (err) {
+      els.midiConnect.disabled = false;
+      els.midiConnect.textContent = 'Connect a MIDI keyboard';
+      toast('MIDI: ' + (err?.message || 'not available'));
+    }
+  });
+  // the pad poll only runs while the dialog is open, like the health HUD
+  els.controllersDialog?.addEventListener('close', stopGamepads);
   els.healthRebuild?.addEventListener('click', rebuildAudio);
   els.healthReset?.addEventListener('click', resetHealth);
   // the HUD polls only while it is open
