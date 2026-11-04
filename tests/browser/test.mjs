@@ -799,6 +799,108 @@ try {
   check('regenerating from the UI keeps playing', uiLive.playing);
   check('and the master is still open', uiLive.gain === null || uiLive.gain > 0.05, String(uiLive.gain));
 
+  console.log('\nPlan');
+  await gotoStudio();
+  // a full song has the sections worth moving; the default loop has one
+  await page.select('#type', 'full');
+  await new Promise((r) => setTimeout(r, 600));
+  const planUi = await page.evaluate(async () => {
+    const { state } = await import('./src/state.js');
+    document.querySelector('details.plan').open = true;
+    return {
+      bars: state.song.bars,
+      sections: state.song.sections.length,
+      rows: document.querySelectorAll('#plan-sections .plan-sec').length,
+      key: document.getElementById('plan-key').textContent.trim(),
+      chords: document.querySelectorAll('#plan-sections .chord').length,
+    };
+  });
+  check('the plan lists every section', planUi.rows === planUi.sections, `${planUi.rows} rows, ${planUi.sections} sections`);
+  check('the plan names its key and length', /\d+ bars/.test(planUi.key), planUi.key);
+  check('the plan shows a chord under the bars', planUi.chords >= planUi.sections, `${planUi.chords} chords`);
+
+  const repeated = await page.evaluate(async () => {
+    const { state } = await import('./src/state.js');
+    const before = state.song.bars;
+    document.querySelector('#plan-sections .plan-sec [data-act="dup"]').click();
+    await new Promise((r) => setTimeout(r, 400));
+    return {
+      before,
+      after: state.song.bars,
+      rows: document.querySelectorAll('#plan-sections .plan-sec').length,
+      edited: !document.getElementById('plan-edited').hidden,
+      reset: !document.getElementById('plan-reset').hidden,
+    };
+  });
+  check('repeating a section lengthens the song', repeated.after > repeated.before, `${repeated.before} -> ${repeated.after} bars`);
+  check('and the panel grows with it', repeated.rows === planUi.sections + 1, `${repeated.rows} rows`);
+  check('an edited song says so', repeated.edited && repeated.reset);
+
+  const moved = await page.evaluate(async () => {
+    const { state } = await import('./src/state.js');
+    const names = () => state.song.sections.map((s) => s.name).join(',');
+    const before = names();
+    // move the third section up: the first two are both "intro", so swapping
+    // them would prove nothing
+    document.querySelectorAll('#plan-sections .plan-sec [data-act="up"]')[2].click();
+    await new Promise((r) => setTimeout(r, 400));
+    return { before, after: names() };
+  });
+  check('moving a section reorders the song', moved.before !== moved.after, `${moved.before} -> ${moved.after}`);
+
+  const chordChange = await page.evaluate(async () => {
+    const chip = document.querySelector('#plan-sections .chord');
+    const before = chip.textContent.trim();
+    chip.click();
+    await new Promise((r) => setTimeout(r, 400));
+    const after = document.querySelector('#plan-sections .chord').textContent.trim();
+    return { before, after };
+  });
+  check('clicking a chord changes it', chordChange.before !== chordChange.after, `${chordChange.before} -> ${chordChange.after}`);
+
+  const share = await page.evaluate(async () => {
+    const { state } = await import('./src/state.js');
+    const { encodeShare, decodeShare } = await import('./src/export/artwork.js');
+    const encoded = await encodeShare(state.presets, state.seed, state.plan);
+    const decoded = await decodeShare(encoded);
+    const names = (p) => p.sections.map((s) => `${s.name}:${s.bars}`).join(',');
+    return {
+      chars: encoded.length,
+      hasPlan: !!decoded?.plan,
+      same: decoded?.plan ? names(decoded.plan) === names(state.plan) : false,
+      plain: (await encodeShare(state.presets, state.seed, null)).length,
+    };
+  });
+  check('an edited song travels in its link', share.hasPlan && share.same, `${share.chars} chars`);
+  check('the link stays a link, not a document', share.chars < 4000, `${share.chars} chars vs ${share.plain} plain`);
+
+  const editLive = await page.evaluate(async () => {
+    document.getElementById('play').click();
+    await new Promise((r) => setTimeout(r, 900));
+    const before = document.querySelector('#play').textContent.includes('⏸');
+    document.querySelector('#plan-sections .plan-sec [data-act="dup"]').click();
+    await new Promise((r) => setTimeout(r, 1400));
+    const gain = globalThis.__musicgen?.app?.player?.graph?.master?.gain?.value ?? null;
+    return { before, playing: document.querySelector('#play').textContent.includes('⏸'), gain };
+  });
+  check('editing the plan while playing keeps playing', editLive.before && editLive.playing);
+  check('and the master is still open after an edit', editLive.gain === null || editLive.gain > 0.05, String(editLive.gain));
+
+  const reset = await page.evaluate(async () => {
+    const { state } = await import('./src/state.js');
+    const { plan } = await import('./src/core/composer.js');
+    const { planSignature } = await import('./src/core/plan-edit.js');
+    document.getElementById('plan-reset').click();
+    await new Promise((r) => setTimeout(r, 400));
+    return {
+      bars: state.song.bars,
+      edited: !document.getElementById('plan-edited').hidden,
+      matchesSeed: planSignature(state.plan) === planSignature(plan(state.presets, state.seed)),
+    };
+  });
+  check('resetting returns to the seed', reset.bars === planUi.bars && !reset.edited, `${reset.bars} bars`);
+  check('and the plan is the seed\'s plan again', reset.matchesSeed);
+
   await page.screenshot({ path: path.join(ROOT, 'tests', 'browser', 'screenshot.png'), fullPage: true });
 } finally {
   await browser.close();

@@ -23,6 +23,8 @@ export const els = {
   sheet: $('menu-sheet'), help: $('help'), library: $('library'),
   libraryList: $('library-list'), searchlib: $('searchlib'), fileinput: $('fileinput'),
   midiinput: $('midiinput'), exporttarget: $('exporttarget'),
+  planSections: $('plan-sections'), planKey: $('plan-key'), planEdited: $('plan-edited'),
+  planReset: $('plan-reset'), planCopy: $('plan-copy'),
 };
 
 // Everything that changes at runtime lives here, so modules can share it

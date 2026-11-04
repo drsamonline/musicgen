@@ -9,6 +9,11 @@ export const state = {
   locks: { style: false, mood: false, theme: false, tech: false, type: false, bpm: false },
   seed: randomSeed(12),
   song: null,
+  // An edited plan, and the presets+seed it was planned from. `generate()`
+  // ignores the plan the moment either moves, so a stale edit can never be
+  // played against dials it was not made for.
+  plan: null,
+  planSource: null,
   ui: { volume: 0.9, vizMode: 'roll', advanced: false, theme: 'system', muted: false, position: 0, seenIntro: false },
 };
 

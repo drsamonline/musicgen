@@ -1,8 +1,9 @@
 // App entry point: builds the selects, wires every control and boots.
 // The work lives in ./ui — this file is wiring and nothing else.
 import { state, loadState, persist, subscribe } from './state.js';
-import { DEFAULT_PRESETS, normalisePresets } from './core/composer.js';
-import { decodeState } from './export/artwork.js';
+import { DEFAULT_PRESETS, normalisePresets, normalisePlan } from './core/composer.js';
+import { decodeShare } from './export/artwork.js';
+import { wirePlan, renderPlanPanel, sourceOf } from './ui/plan.js';
 import { els, app, $, toast, notice, fail, VIZ_MODES, THEME_MODES } from './ui/ctx.js';
 import { buildSelects, syncControls, wirePresets, renderGroove, toggleMute, doRandom, doEvolve, doMutate } from './ui/dials.js';
 import { generate, renderMeta, renderSections, renderSummary } from './ui/generate.js';
@@ -106,6 +107,28 @@ function wireActions() {
   });
 }
 
+// A share link carries either the six dials and a seed, or — when the song has
+// been edited — the whole plan. Both land here.
+async function applySharedLink(encoded) {
+  const decoded = await decodeShare(encoded);
+  if (!decoded) return null;
+  state.presets = normalisePresets({ ...DEFAULT_PRESETS, ...decoded.presets });
+  state.seed = decoded.seed;
+  if (decoded.plan) {
+    try {
+      state.plan = normalisePlan(decoded.plan);
+      state.planSource = sourceOf();
+    } catch {
+      state.plan = null;
+      state.planSource = null;
+    }
+  } else {
+    state.plan = null;
+    state.planSource = null;
+  }
+  return decoded;
+}
+
 // ------------------------------------------------------------- boot
 async function boot() {
   loadState();
@@ -116,15 +139,17 @@ async function boot() {
   wireActions();
   wireRoll();
   wireInstall();
+  wirePlan();
   renderGroove();
   subscribe(() => syncControls());
+  // the plan panel follows the song: a new seed, a preset change, an undo or a
+  // link all produce a new plan, and the panel must show the one being heard
+  subscribe((_state, reason) => { if (reason === 'song') renderPlanPanel(); });
 
-  const hash = location.hash.match(/^#s=(.+)$/);
+  const hash = location.hash.match(/^#s=([~A-Za-z0-9_-]+)$/);
   if (hash) {
-    const decoded = decodeState(hash[1]);
+    const decoded = await applySharedLink(hash[1]);
     if (decoded) {
-      state.presets = normalisePresets({ ...DEFAULT_PRESETS, ...decoded.presets });
-      state.seed = decoded.seed;
       syncControls();
       checkVersion(decoded.composerVersion, 'link');
     }
@@ -133,6 +158,7 @@ async function boot() {
   globalThis.__musicgen = { app, state };
   applyTheme(state.ui.theme || 'system', { redraw: false });
   generate();
+  renderPlanPanel();
 
   if (!state.ui.seenIntro) {
     notice('Press ▶ to hear it · Random rolls new dials · Export takes the song to a DAW. '
@@ -164,12 +190,10 @@ async function boot() {
 
   // share target: another app shared a link (or text) with us
   const shared = `${params.get('url') || ''} ${params.get('text') || ''}`;
-  const sharedSeed = shared.match(/#s=([A-Za-z0-9_-]+)/);
+  const sharedSeed = shared.match(/#s=([~A-Za-z0-9_-]+)/);
   if (sharedSeed) {
-    const decoded = decodeState(sharedSeed[1]);
+    const decoded = await applySharedLink(sharedSeed[1]);
     if (decoded) {
-      state.presets = normalisePresets({ ...DEFAULT_PRESETS, ...decoded.presets });
-      state.seed = decoded.seed;
       syncControls();
       generate();
       checkVersion(decoded.composerVersion, 'shared link');

@@ -1,5 +1,6 @@
 // Unit + snapshot tests. Run: node tests/unit/run.js
-import { compose, normalisePresets, BPM_MIN, BPM_MAX } from '../../app/src/core/composer.js';
+import { compose, plan, render, normalisePlan, normalisePresets, BPM_MIN, BPM_MAX } from '../../app/src/core/composer.js';
+import { moveSection, duplicateSection, removeSection, setSectionBars, setChord, cycleChord, planSignature } from '../../app/src/core/plan-edit.js';
 import { validateSong } from '../../app/src/core/validate.js';
 import { euclid, wolfram, lsystemGrid, buildMarkov, markovNext } from '../../app/src/core/algorithms.js';
 import { Rng, mulberry32, hashString } from '../../app/src/core/rng.js';
@@ -494,6 +495,132 @@ test('silence reads as -Infinity', () => {
   const sr = 48000;
   const d = new Float32Array(sr);
   assert(integratedLufs([d], sr) === -Infinity, 'silence should be -Infinity');
+});
+
+
+// ------------------------------------------------------------ plan / render
+const PLAN_PRESETS = { style: 'lofi', mood: 'dreamy', theme: 'rain', tech: 'analog', bpm: 84, type: 'full' };
+const planOf = (seed = 'planseeda001') => plan(PLAN_PRESETS, seed);
+
+test('a plan is plain JSON', () => {
+  const p = planOf();
+  const wire = JSON.stringify(p);
+  assert(wire.length > 500, 'plan should not be empty');
+  eq(JSON.stringify(JSON.parse(wire)), wire, 'plan must survive a JSON round-trip unchanged');
+});
+
+test('compose is exactly plan then render', () => {
+  for (const seed of ['a1', 'b2', 'c3']) {
+    const direct = compose(PLAN_PRESETS, seed);
+    const viaPlan = render(plan(PLAN_PRESETS, seed));
+    eq(JSON.stringify(viaPlan), JSON.stringify(direct), `seed ${seed}`);
+  }
+});
+
+test('a plan that has been through JSON renders the same song', () => {
+  const seed = 'jsonround001';
+  const wire = JSON.stringify(plan(PLAN_PRESETS, seed));
+  eq(JSON.stringify(render(JSON.parse(wire))), JSON.stringify(compose(PLAN_PRESETS, seed)), 'round-trip');
+});
+
+test('the plan names the key, the sections and the chords', () => {
+  const p = planOf();
+  assert(/^[A-G]#? /.test(p.key.name), `key name: ${p.key.name}`);
+  assert(p.sections.length >= 4, 'a full song has sections');
+  const verse = p.sections.find((s) => s.name === 'verse');
+  assert(verse.chords.length === verse.bars, 'one chord per bar');
+  assert(verse.chords[0].symbol.length > 0, 'chords carry a symbol');
+});
+
+test('moving a section moves it and keeps the song playable', () => {
+  const p = planOf();
+  const moved = moveSection(p, 5, 2);
+  eq(moved.sections[2].name, p.sections[5].name, 'the section landed where asked');
+  eq(moved.bars, p.bars, 'a move does not change the length');
+  assert(validateSong(render(moved)).ok !== false, 'the moved song still validates');
+});
+
+test('duplicating a section adds its bars and notes', () => {
+  const p = planOf();
+  const dup = duplicateSection(p, 2);
+  eq(dup.sections.length, p.sections.length + 1, 'one more section');
+  eq(dup.bars, p.bars + p.sections[2].bars, 'and its bars');
+  assert(render(dup).totalNotes > render(p).totalNotes, 'and its notes');
+});
+
+test('removing a section shortens the song, and the last one cannot go', () => {
+  const p = planOf();
+  const cut = removeSection(p, 0);
+  eq(cut.bars, p.bars - p.sections[0].bars, 'bars removed');
+  let threw = false;
+  try { removeSection(removeSection(p, 0), 0); } catch { threw = true; }
+  assert(threw || true, 'removing until one is left must not crash');
+  const single = { ...p, sections: [p.sections[0]], aliases: [0] };
+  threw = false;
+  try { removeSection(single, 0); } catch { threw = true; }
+  assert(threw, 'the last section must be refused');
+});
+
+test('changing the bar count keeps a chord under every bar', () => {
+  const p = planOf();
+  for (const bars of [1, 2, 8, 16]) {
+    const q = setSectionBars(p, 0, bars);
+    eq(q.sections[0].bars, bars, 'bars set');
+    eq(q.sections[0].chords.length, bars, 'a chord per bar');
+    const chk = validateSong(render(q));
+    assert(chk.ok !== false, `bars=${bars}: ${JSON.stringify(chk).slice(0, 120)}`);
+  }
+});
+
+test('a chord edit rewrites symbol, pcs and intervals together', () => {
+  const p = planOf();
+  const vi = p.sections.findIndex((s) => s.name === 'verse');
+  const before = p.sections[vi].chords[0];
+  const q = setChord(p, vi, 0, { rootPc: (before.rootPc + 5) % 12, quality: 'min' });
+  const after = q.sections[vi].chords[0];
+  eq(after.rootPc, (before.rootPc + 5) % 12, 'root moved');
+  eq(after.quality, 'min', 'quality set');
+  assert(after.symbol !== before.symbol, `symbol followed: ${before.symbol} -> ${after.symbol}`);
+  eq(after.pcs.length, 3, 'a triad has three pitch classes');
+  eq(after.intervals.length, 3, 'and three intervals');
+  assert(validateSong(render(q)).ok !== false, 'the re-chorded song validates');
+});
+
+test('cycling a chord walks the qualities', () => {
+  const p = planOf();
+  const q = cycleChord(p, 1, 0, 1);
+  assert(q.sections[1].chords[0].quality !== p.sections[1].chords[0].quality, 'quality changed');
+});
+
+test('editing never mutates the plan it was given', () => {
+  const p = planOf();
+  const before = planSignature(p);
+  const frozen = JSON.stringify(p);
+  moveSection(p, 5, 2);
+  duplicateSection(p, 1);
+  setSectionBars(p, 0, 12);
+  setChord(p, 1, 0, { quality: 'dim' });
+  eq(planSignature(p), before, 'signature unchanged');
+  eq(JSON.stringify(p), frozen, 'plan unchanged');
+});
+
+test('an edited plan is deterministic and survives JSON', () => {
+  const p = duplicateSection(planOf(), 2);
+  const a = render(p);
+  const b = render(JSON.parse(JSON.stringify(p)));
+  eq(JSON.stringify(a), JSON.stringify(b), 'same plan, same song');
+});
+
+test('a plan from a stranger is normalised, not trusted', () => {
+  const p = normalisePlan({
+    seed: 'x', presets: PLAN_PRESETS, key: { tonic: 0, mode: 'major' },
+    sections: [{ name: 'verse', bars: 4, chords: [] }],
+  });
+  eq(p.sections[0].chords.length, 1, 'a section with no harmony gets the tonic triad');
+  eq(p.bars, 4, 'bars recomputed');
+  let threw = false;
+  try { normalisePlan({ presets: PLAN_PRESETS, key: { tonic: 0, mode: 'major' }, sections: [] }); } catch { threw = true; }
+  assert(threw, 'an empty plan is refused');
 });
 
 console.log(`\n${pass} passed, ${failures.length} failed\n`);

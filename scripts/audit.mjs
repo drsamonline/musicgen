@@ -57,7 +57,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const results = [];
 const failures = [];
 
-async function auditPage(name, { url, theme = 'dark', width = 430, height = 932 }) {
+async function auditPage(name, { url, theme = 'dark', width = 430, height = 932, prepare = null }) {
   const page = await browser.newPage();
   await page.setViewport({ width, height, deviceScaleFactor: 1 });
   await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: theme }]);
@@ -70,6 +70,7 @@ async function auditPage(name, { url, theme = 'dark', width = 430, height = 932 
 
   await page.goto(url, { waitUntil: 'networkidle0' });
   await wait(800);
+  if (prepare) { await prepare(page); await wait(400); }
 
   const axeResults = await page.evaluate(async (axeSrc) => {
     // eslint-disable-next-line no-eval
@@ -121,6 +122,16 @@ await auditPage('studio (dark)', { url: `${base}app/`, theme: 'dark' });
 await auditPage('studio (light)', { url: `${base}app/`, theme: 'light' });
 await auditPage('studio desktop (dark)', { url: `${base}app/`, theme: 'dark', width: 1200, height: 900 });
 await auditPage('landing (dark)', { url: base, theme: 'dark', width: 1440, height: 900 });
+// The plan panel is collapsed by default, so opening it is the only way axe
+// ever sees the chord chips and the section tools.
+await auditPage('studio plan open (dark)', {
+  url: `${base}app/`, theme: 'dark', width: 1200, height: 900,
+  prepare: (page) => page.evaluate(() => { document.querySelector('details.plan').open = true; }),
+});
+await auditPage('studio plan open (light)', {
+  url: `${base}app/`, theme: 'light',
+  prepare: (page) => page.evaluate(() => { document.querySelector('details.plan').open = true; }),
+});
 
 await browser.close();
 server.close();

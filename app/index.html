@@ -163,6 +163,23 @@
     <div id="sections" class="sections"></div>
   </section>
 
+  <details class="plan" aria-label="Plan">
+    <summary>
+      <span class="plan-title">Plan</span>
+      <span id="plan-key" class="chip"></span>
+      <span id="plan-edited" class="chip badge" hidden>edited</span>
+    </summary>
+    <div class="plan-body">
+      <p class="plan-hint">The decisions behind this song — its key, its sections, the chord under every bar.
+        Change one and the song re-renders from the same seed; the seed still reproduces the original.</p>
+      <ol id="plan-sections" class="plan-sections"></ol>
+      <div class="plan-foot">
+        <button id="plan-copy" class="ghost small">Copy plan JSON</button>
+        <button id="plan-reset" class="ghost small" hidden>Reset to seed</button>
+      </div>
+    </div>
+  </details>
+
   <section class="actions">
     <button id="exportwav">Export WAV</button>
     <button id="exportmidi">MIDI</button>

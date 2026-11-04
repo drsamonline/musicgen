@@ -7,7 +7,7 @@
 [![license: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-c6f24e.svg)](LICENSE)
 [![dependencies: 0](https://img.shields.io/badge/dependencies-0-9aa8ff.svg)](#)
 [![tempo: 20–500 BPM](https://img.shields.io/badge/tempo-20--500%20BPM-9aa8ff.svg)](#)
-[![size: 76 KB gzipped](https://img.shields.io/badge/size-68%20KB%20gzipped-9aa8ff.svg)](#)
+[![size: 91 KB gzipped](https://img.shields.io/badge/size-91%20KB%20gzipped-9aa8ff.svg)](#)
 [![PWA: offline-first](https://img.shields.io/badge/PWA-offline--first-c6f24e.svg)](#)
 [![web audio api](https://img.shields.io/badge/web%20audio-api-ff9f6b.svg)](#)
 
@@ -53,6 +53,8 @@ Then use your browser's **Install** / **Add to Home Screen** (iOS: Share → Add
 
 **The composer** — eleven stages, each testable: key and mode → harmonic grid (2nd-order Markov over style progressions, modal interchange) → voicing with a voice-leading solver → bass → drums (groove templates, Euclidean layers, phrase fills) → motif → development transforms → pad and counter-line → arp → humanise → tension curve.
 
+**The plan** — a song is two things: the decisions and the notes they produce. `plan(presets, seed)` returns the decisions as plain JSON — key, form, the chord under every bar, the theme, the tempo map — and `render(plan)` turns them into notes. `compose()` is the two together, and the split changed not one note: 330 preset × mood × seed combinations were hashed before and after it. The **Plan** panel in the studio opens that object up: reorder a section, repeat the chorus, change how many bars the intro runs, click a chord to change its quality. Every edit re-renders from the same seed, and the seed still reproduces the original. An edited song carries its plan in the share link — deflated, about 1.6 KB — so the link still hands over the song you heard rather than the one the seed would have made.
+
 **The presets** — every axis has a **None**: no genre, no mood bias, no theme, no form, plain sine tones — so you can strip the song back to the notes and add only what you want. 11 styles, 10 moods, 10 themes, 8 song types, 7 synthesis technologies, plus a compatibility table that maps styles to allowed moods and engines. Tempo is a **map, not a number**: choruses lift, verses settle, every phrase gets a little rubato and the last two bars ease off, so a song breathes instead of clicking along. The BPM dial sets the centre and *Tempo drift* sets how far it may wander (0–35%). Range: **20–500 BPM**; per-track locks freeze the drums or the melody while you reroll everything else. Every share link carries the composer version, so an old seed can tell you it will sound different instead of silently lying.
 
 **The ambience** — eight synthesised textures (rain, wind, fire, vinyl, crickets, ocean, stream, hum) with its own **Ambience dial**: *Auto* follows the theme, *None* is silence, or you pick one outright. Sitting under the arrangement with slow LFO movement and sparse droplets/crackles. Plus section transitions: a noise riser into every lift and a soft impact on the downbeat.
@@ -81,8 +83,8 @@ npm run audit
 ## Tests
 
 ```bash
-npm test              # 47 unit tests, no browser needed
-npm run test:browser  # 116 tests in real Chromium with real Web Audio
+npm test              # 60 unit tests, no browser needed
+npm run test:browser  # 130 tests in real Chromium with real Web Audio
 npm run lint          # determinism lint: no Math.random / Date.now in pure modules
 npm run budget        # shell size, precache completeness, no external requests
 npm run visual        # pixel-diff the studio against committed baselines

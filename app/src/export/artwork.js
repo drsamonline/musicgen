@@ -21,7 +21,33 @@ export function decodeState(str) {
   try {
     const b64 = str.replace(/-/g, '+').replace(/_/g, '/');
     const json = decodeURIComponent(escape(atob(b64)));
+    return decodeCompact(JSON.parse(json));
+  } catch {
+    return null;
+  }
+}
+
+// Async because a plan-carrying link may be deflated. Everything else resolves
+// on the first tick.
+export async function decodeShare(str) {
+  if (!str) return null;
+  if (str[0] !== PLAN_MARK) return decodeState(str);
+  try {
+    const kind = str[1];
+    const bytes = fromB64(str.slice(2));
+    const json = kind === 'z' ? await inflate(bytes) : new TextDecoder().decode(bytes);
     const c = JSON.parse(json);
+    const decoded = decodeCompact(c);
+    if (!decoded) return null;
+    if (c.pl) decoded.plan = c.pl;
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
+function decodeCompact(c) {
+  try {
     const [bars, unit] = String(c.k || '4x4').split('x').map(Number);
     return {
       presets: {
@@ -43,6 +69,69 @@ export function decodeState(str) {
 export function shareUrl(presets, seed) {
   const base = `${location.origin}${location.pathname}`;
   return `${base}#s=${encodeState(presets, seed)}`;
+}
+
+// ------------------------------------------------------- sharing a plan
+//
+// A generated song is six dials and a seed. An *edited* song is more than
+// that, so its link has to carry the plan itself or it would quietly hand the
+// recipient a different song. The plan is JSON; deflate-raw takes ~9 KB of it
+// to about 1.5 KB, which fits a URL fragment comfortably.
+//
+// Links written before this existed carry no marker and decode exactly as they
+// always did, so nothing already shared breaks.
+const PLAN_MARK = '~';
+
+function toB64(bytes) {
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function fromB64(str) {
+  const bin = atob(str.replace(/-/g, '+').replace(/_/g, '/'));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function deflate(str) {
+  if (typeof CompressionStream !== 'function') return null;
+  try {
+    const stream = new Blob([new TextEncoder().encode(str)])
+      .stream()
+      .pipeThrough(new CompressionStream('deflate-raw'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+async function inflate(bytes) {
+  if (typeof DecompressionStream !== 'function') throw new Error('no DecompressionStream');
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Response(stream).text();
+}
+
+// Encode a song *including* an edited plan. `plan` may be null, in which case
+// this is byte-identical to encodeState().
+export async function encodeShare(presets, seed, plan) {
+  if (!plan) return encodeState(presets, seed);
+  const compact = JSON.parse(JSON.stringify({ presets, seed }));
+  const body = JSON.stringify({
+    s: compact.presets.style, m: compact.presets.mood, t: compact.presets.theme,
+    h: compact.presets.tech, b: compact.presets.bpm, y: compact.presets.type,
+    k: compact.presets.timeSig?.join('x'), p: String(seed),
+    v: COMPOSER_VERSION, pl: plan,
+  });
+  const packed = await deflate(body);
+  if (!packed) return `${PLAN_MARK}j${toB64(new TextEncoder().encode(body))}`;
+  return `${PLAN_MARK}z${toB64(packed)}`;
+}
+
+export async function shareUrlFor(presets, seed, plan) {
+  const base = `${location.origin}${location.pathname}`;
+  return `${base}#s=${await encodeShare(presets, seed, plan)}`;
 }
 
 // --------------------------------------------------------------- artwork

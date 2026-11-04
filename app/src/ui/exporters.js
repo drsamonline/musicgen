@@ -5,7 +5,7 @@ import { renderSong, tempoMapOf } from '../audio/engine.js';
 import { analyseBuffer, normalisationGain, encodeWav, download } from '../export/wav.js';
 import { songToMidi } from '../export/midi.js';
 import { zipStore } from '../export/zip.js';
-import { drawArtwork, shareUrl, encodeState, decodeState } from '../export/artwork.js';
+import { drawArtwork, shareUrl, shareUrlFor, encodeShare, encodeState, decodeState } from '../export/artwork.js';
 import { extractTheme } from '../import/midi.js';
 import { libraryList, librarySave, libraryDelete } from '../state.js';
 import { els, app, toast, notice, fail } from './ctx.js';
@@ -159,7 +159,11 @@ export function exportArt() {
 }
 
 export async function doShare() {
-  const url = shareUrl(state.presets, state.seed);
+  // An edited song must travel as its plan: the dials and seed alone would
+  // hand the recipient a different song.
+  const url = state.plan
+    ? await shareUrlFor(state.presets, state.seed, state.plan)
+    : shareUrl(state.presets, state.seed);
   const text = `${state.song?.title ?? 'A song'} — made with MusicGen`;
   try {
     if (navigator.share) {
@@ -179,7 +183,10 @@ export async function doShare() {
     await navigator.clipboard.writeText(url);
     toast('Share link copied');
   } catch {
-    app.history.replaceState(null, '', `#s=${encodeState(state.presets, state.seed)}`);
+    const encoded = state.plan
+      ? await encodeShare(state.presets, state.seed, state.plan)
+      : encodeState(state.presets, state.seed);
+    app.history.replaceState(null, '', `#s=${encoded}`);
     toast('Link is in the address bar');
   }
 }
