@@ -223,6 +223,7 @@
     <button data-act="exportlib">Export library (zip)</button>
     <button data-act="install">Install app</button>
     <button data-act="help">Keyboard shortcuts</button>
+    <button data-act="health">Audio health</button>
     <button data-act="close">Close</button>
   </div>
 
@@ -245,6 +246,18 @@
       <dt>Esc</dt><dd>Stop</dd>
       <dt>?</dt><dd>This dialog</dd>
     </dl>
+    <form method="dialog"><button>Close</button></form>
+  </dialog>
+
+  <dialog id="health-dialog">
+    <h2>Audio health</h2>
+    <p id="health-verdict" class="health-verdict" data-level="idle">Measuring…</p>
+    <dl id="health-body" class="health-body"></dl>
+    <div class="health-actions">
+      <button id="health-rebuild">Rebuild audio</button>
+      <button id="health-reset" class="ghost">Reset counters</button>
+    </div>
+    <p class="dialog-note">These counters describe this session only. Nothing here leaves your device.</p>
     <form method="dialog"><button>Close</button></form>
   </dialog>
 

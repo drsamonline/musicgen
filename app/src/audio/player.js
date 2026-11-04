@@ -4,6 +4,7 @@ import { buildGraph, voiceCap } from './graph.js';
 import { buildEvents, makeScheduler, applyAutomation } from './scheduler.js';
 import { scheduleTransitions } from './transitions.js';
 import { prepareWorklets } from './worklets.js';
+import { makeHealth, noteTick, noteEvent, noteSkip, noteRecovery } from './health.js';
 
 // ---------------------------------------------------------------- live player
 export class Player {
@@ -25,6 +26,11 @@ export class Player {
     this.userVolume = 0.9;
     this.lastTick = 0;
     this.watchdog = null;
+    // counters for the health HUD, and the guard that stops two recoveries
+    // fighting over one context
+    this.health = makeHealth();
+    this.recovering = false;
+    this.ctxListener = null;
   }
 
   // Regenerating used to create a whole new Player — and therefore a new
@@ -54,6 +60,7 @@ export class Player {
     if (this.ctx) return;
     const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
     this.ctx = new AC({ latencyHint: 'interactive' });
+    this.watchContext();
     this.worklets = await prepareWorklets(this.ctx);
     this.graph = buildGraph(this.ctx, this.song);
     this.schedule = makeScheduler(this.graph, this.song);
@@ -188,6 +195,12 @@ export class Player {
   tick() {
     if (!this.playing) return;
     this.lastTick = Date.now();
+    // A context that is running but whose clock has stopped is the failure
+    // `state` never reports: the transport says playing, nothing is heard.
+    if (noteTick(this.health, this.ctx.currentTime, this.lastTick)) {
+      this.recover('stalled');
+      return;
+    }
     this.ensureAudible();
     const now = this.ctx.currentTime - this.startCtxTime; // song time at "now"
     const horizon = now + this.lookahead;
@@ -196,7 +209,8 @@ export class Player {
       const ev = this.events[this.idx++];
       const when = this.startCtxTime + (ev.sec - this.startPos);
       // a note more than 60 ms late is skipped rather than fired in a burst
-      if (when < this.ctx.currentTime - 0.06) continue;
+      if (when < this.ctx.currentTime - 0.06) { noteSkip(this.health); continue; }
+      if (when < this.ctx.currentTime) noteEvent(this.health, this.ctx.currentTime - when);
       try {
         this.schedule(ev, Math.max(when, this.ctx.currentTime + 0.004));
       } catch (err) {
@@ -265,6 +279,81 @@ export class Player {
     if (this.graph && this.playing) {
       const g = this.graph.master.gain;
       try { g.setTargetAtTime(this.userVolume * 0.32, this.ctx.currentTime, 0.02); } catch { g.value = this.userVolume * 0.32; }
+    }
+  }
+
+  // ------------------------------------------------------------ recovery
+  // The device can go away under us: iOS interrupts the context when the
+  // phone locks, a Bluetooth route can close it, an audio-thread stall can
+  // freeze the clock. `state` catches the first two, `noteTick` catches the
+  // third, and both land here.
+  watchContext() {
+    if (!this.ctx || this.ctxListener) return;
+    this.ctxListener = () => { this.onContextState(); };
+    try {
+      this.ctx.addEventListener('statechange', this.ctxListener);
+    } catch {
+      this.ctx.onstatechange = this.ctxListener;
+    }
+  }
+
+  detachContext() {
+    if (this.ctx && this.ctxListener) {
+      try { this.ctx.removeEventListener('statechange', this.ctxListener); } catch { /* older Safari */ }
+    }
+    this.ctxListener = null;
+  }
+
+  async onContextState() {
+    const state = this.ctx?.state;
+    if (state === 'closed') { await this.recover('closed'); return; }
+    if (!this.playing) return;
+    // 'interrupted' is Safari's word for "the phone took the audio away"
+    if (state === 'suspended' || state === 'interrupted') {
+      try {
+        await this.ctx.resume();
+        if (this.ctx.state !== 'running') await this.recover('resume-failed');
+      } catch {
+        await this.recover('resume-failed');
+      }
+    }
+  }
+
+  // Rebuild everything the context owned, keeping the song and the position.
+  // This is the expensive path, and it is the one that turns a dead app back
+  // into a playing one.
+  async rebuild({ position = 0, resumePlaying = false } = {}) {
+    const old = this.ctx;
+    this.playing = false;
+    this.stopTimerOnly();
+    this.detachContext();
+    this.ctx = null;
+    this.graph = null;
+    this.clockNode = null;
+    this.worklets = null;
+    this.schedule = null;
+    this.idx = 0;
+    if (old) {
+      try { await old.close(); } catch { /* it may already be gone */ }
+    }
+    await this.init();
+    if (resumePlaying) await this.play(position);
+  }
+
+  async recover(reason = 'manual') {
+    if (this.recovering) return false;
+    this.recovering = true;
+    const wasPlaying = this.playing;
+    const position = this.position;
+    noteRecovery(this.health, reason);
+    try {
+      await this.rebuild({ position, resumePlaying: wasPlaying });
+      return true;
+    } catch (err) {
+      if (globalThis.console) console.warn('audio recovery failed', err);
+      return false;
+    } finally {
+      this.recovering = false;
     }
   }
 

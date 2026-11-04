@@ -926,3 +926,31 @@ a:focus-visible,
   .plan-sec { grid-template-columns: 1fr; grid-template-areas: 'head' 'tools' 'chords'; }
   .plan-tools { flex-wrap: wrap; }
 }
+
+/* ---------------------------------------------------------- audio health
+   A diagnostics panel that only exists while it is open: no timer, no work,
+   no frames spent on a readout nobody is looking at. */
+.health-verdict {
+  margin: 0 0 12px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+.health-verdict[data-level='ok'] { border-color: rgba(95, 227, 192, 0.42); color: var(--accent-3); }
+.health-verdict[data-level='warn'] { border-color: rgba(255, 207, 107, 0.42); color: #ffcf6b; }
+.health-verdict[data-level='bad'] { border-color: rgba(255, 111, 156, 0.5); color: var(--accent-2); }
+.health-verdict[data-level='idle'] { color: var(--muted); }
+.health-body {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 16px;
+  margin: 0;
+  font-size: 0.8rem;
+}
+.health-body dt { color: var(--muted); }
+.health-body dd { margin: 0; font-variant-numeric: tabular-nums; color: var(--text); }
+.health-actions { display: flex; gap: 8px; margin: 14px 0 10px; flex-wrap: wrap; }

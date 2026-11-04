@@ -7,7 +7,7 @@
 [![license: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-c6f24e.svg)](LICENSE)
 [![dependencies: 0](https://img.shields.io/badge/dependencies-0-9aa8ff.svg)](#)
 [![tempo: 20–500 BPM](https://img.shields.io/badge/tempo-20--500%20BPM-9aa8ff.svg)](#)
-[![size: 91 KB gzipped](https://img.shields.io/badge/size-91%20KB%20gzipped-9aa8ff.svg)](#)
+[![size: 95 KB gzipped](https://img.shields.io/badge/size-95%20KB%20gzipped-9aa8ff.svg)](#)
 [![PWA: offline-first](https://img.shields.io/badge/PWA-offline--first-c6f24e.svg)](#)
 [![web audio api](https://img.shields.io/badge/web%20audio-api-ff9f6b.svg)](#)
 
@@ -83,8 +83,8 @@ npm run audit
 ## Tests
 
 ```bash
-npm test              # 60 unit tests, no browser needed
-npm run test:browser  # 130 tests in real Chromium with real Web Audio
+npm test              # 70 unit tests, no browser needed
+npm run test:browser  # 151 tests in real Chromium with real Web Audio
 npm run lint          # determinism lint: no Math.random / Date.now in pure modules
 npm run budget        # shell size, precache completeness, no external requests
 npm run visual        # pixel-diff the studio against committed baselines
@@ -114,6 +114,14 @@ The suite asserts, rather than claims:
 ## Mix balance (why it sounds like a mix)
 
 Per-track loudness is measured, not eyeballed: the drum bus has its own compressor, every track has a measured trim, and `npm run test:browser` renders each track solo and fails if anything is buried more than 18 dB or if the bass sits more than 12 dB over the drums. That test exists because the bass *did* sit 18 dB over the drums in v2.2.0, and it was the difference between "a song" and "a bass solo".
+
+## Audio health
+
+The menu has an **Audio health** panel: context state, clock source, sample rate, base latency, voice-pool occupancy, worst tick gap, late and dropped notes, clock stalls and rebuilds. It polls only while it is open.
+
+It exists because a browser audio app fails in ways you cannot hear in a screenshot. A phone locking interrupts the context; a Bluetooth route closing kills it; a busy audio thread freezes `currentTime` while `state` still reports `running`. All three look identical from the outside — *it went quiet* — and none of them leave anything a bug report can carry.
+
+Two of those now repair themselves. A `statechange` to `interrupted`/`suspended` is resumed, and a clock that stops advancing while the transport says it is playing triggers a full rebuild — new context, new graph, same song, same position. The panel's **Rebuild audio** button is the same path, for the case where nothing fired. The suite proves it by freezing `currentTime` mid-song and asserting playback comes back on its own.
 
 ## Playback resilience
 

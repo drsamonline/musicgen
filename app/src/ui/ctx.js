@@ -25,6 +25,8 @@ export const els = {
   midiinput: $('midiinput'), exporttarget: $('exporttarget'),
   planSections: $('plan-sections'), planKey: $('plan-key'), planEdited: $('plan-edited'),
   planReset: $('plan-reset'), planCopy: $('plan-copy'),
+  healthDialog: $('health-dialog'), healthBody: $('health-body'), healthVerdict: $('health-verdict'),
+  healthRebuild: $('health-rebuild'), healthReset: $('health-reset'),
 };
 
 // Everything that changes at runtime lives here, so modules can share it
