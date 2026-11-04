@@ -12,8 +12,7 @@ import { ensurePlayer, play, pause, stop, toggleLoop, toggleAB, applyVolume, wir
 import { applyTheme, cycleTheme, setVizMode, wireRoll, stopRaf } from './ui/visuals.js';
 import {
   exportWav, exportStems, exportMidi, exportJson, importJson, exportArt, doShare, doSave,
-  exportLibrary, openLibrary, toggleRecord, openSettings, onFilePicked, onMidiPicked,
-} from './ui/exporters.js';
+  exportLibrary, openLibrary, toggleRecord, openSettings, onFilePicked, onMidiPicked, exportXm } from './ui/exporters.js';
 
 // ------------------------------------------------------------- wiring
 function wireActions() {
@@ -40,6 +39,7 @@ function wireActions() {
     if (act === 'wav') exportWav();
     if (act === 'stems') exportStems();
     if (act === 'midi') exportMidi();
+    if (act === 'xm') exportXm();
     if (act === 'json') exportJson();
     if (act === 'import') importJson();
     if (act === 'art') exportArt();

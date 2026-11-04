@@ -18,6 +18,7 @@ import { makeTempoMap, flatTempo, describeTempo } from '../../app/src/core/tempo
 import { extractTheme, parseMidi } from '../../app/src/import/midi.js';
 import { randomPresets } from '../../app/src/presets/compatibility.js';
 import { zipStore, crc32 } from '../../app/src/export/zip.js';
+import { songToXm, cycleWave, drumSample } from '../../app/src/export/xm.js';
 import { makeHealth, noteTick, noteEvent, noteSkip, noteRecovery, report, verdict, LATE_MS, STALL_MS } from '../../app/src/audio/health.js';
 import { noteLabel, cellLabel, buildStepIndex, rowsFor, windowFor, TRACK_COLUMNS, STEPS_PER_BEAT } from '../../app/src/visual/tracker.js';
 
@@ -809,6 +810,187 @@ test('a stacked drum step says so instead of dropping the second hit', () => {
   eq(cellLabel('drums', [{ drum: 'tom', v: 0.5 }]), 'tom');
   eq(cellLabel('drums', []), null);
   eq(cellLabel('lead', [{ p: 72 }]), 'C-5', 'pitched tracks still print pitches');
+});
+
+
+// ------------------------------------------------------------------- xm
+// A decoder written from the XM specification, used to prove the writer emits
+// a file a player can actually walk: header, order table, packed patterns,
+// instrument headers, delta-encoded sample data, and no byte left over.
+function parseXm(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const str = (o, n) => {
+    let out = '';
+    for (let i = 0; i < n; i++) { const c = bytes[o + i]; if (!c) break; out += String.fromCharCode(c); }
+    return out;
+  };
+  let o = 0;
+  const sig = str(0, 17); o = 17;
+  const name = str(o, 20); o += 20;
+  const magic = bytes[o]; o += 1;
+  const tracker = str(o, 20); o += 20;
+  const version = dv.getUint16(o, true); o += 2;
+  const headerSize = dv.getUint32(o, true); o += 4;
+  const songLen = dv.getUint16(o, true); o += 2;
+  o += 2; // restart
+  const channels = dv.getUint16(o, true); o += 2;
+  const patternCount = dv.getUint16(o, true); o += 2;
+  const instrumentCount = dv.getUint16(o, true); o += 2;
+  const flags = dv.getUint16(o, true); o += 2;
+  const tempo = dv.getUint16(o, true); o += 2;
+  const bpm = dv.getUint16(o, true); o += 2;
+  const orders = [...bytes.slice(o, o + songLen)]; o += 256;
+
+  const patterns = [];
+  for (let p = 0; p < patternCount; p++) {
+    const hlen = dv.getUint32(o, true); o += 4;
+    o += 1; // packing type
+    const rows = dv.getUint16(o, true); o += 2;
+    const size = dv.getUint16(o, true); o += 2;
+    const cells = bytes.slice(o, o + size); o += size;
+    let notes = 0; let keyOffs = 0; let i = 0;
+    const instrumentsUsed = new Set();
+    while (i < cells.length) {
+      if (cells[i] & 0x80) { i += 1; continue; }
+      const n = cells[i];
+      if (n === 97) keyOffs++;
+      else if (n > 0) { notes++; instrumentsUsed.add(cells[i + 1]); }
+      i += 5;
+    }
+    patterns.push({ hlen, rows, size, notes, keyOffs, instrumentsUsed: [...instrumentsUsed].sort((a, b) => a - b) });
+  }
+
+  const instruments = [];
+  for (let k = 0; k < instrumentCount; k++) {
+    const isize = dv.getUint32(o, true); o += 4;
+    const iname = str(o, 22); o += 22;
+    o += 1; // type
+    const nsamp = dv.getUint16(o, true); o += 2;
+    const shSize = dv.getUint32(o, true); o += 4;
+    o += 96 + 48 + 48 + 14;
+    const fadeout = dv.getUint16(o, true); o += 2;
+    o += 22;
+    const samples = [];
+    for (let i = 0; i < nsamp; i++) {
+      const length = dv.getUint32(o, true); o += 4;
+      const loopStart = dv.getUint32(o, true); o += 4;
+      const loopLength = dv.getUint32(o, true); o += 4;
+      const volume = bytes[o]; o += 1;
+      const finetune = dv.getInt8(o); o += 1;
+      const type = bytes[o]; o += 1;
+      o += 1; // panning
+      const relNote = dv.getInt8(o); o += 1;
+      o += 1 + 22;
+      const raw = bytes.slice(o, o + length); o += length;
+      const out = new Int8Array(length);
+      let last = 0;
+      for (let j = 0; j < length; j++) { last = (last + raw[j]) & 0xff; out[j] = last > 127 ? last - 256 : last; }
+      samples.push({ length, loopStart, loopLength, volume, finetune, type, relNote, data: out });
+    }
+    instruments.push({ isize, iname, nsamp, shSize, fadeout, samples });
+  }
+  return {
+    sig, name, magic, tracker, version, headerSize, songLen, channels,
+    patternCount, instrumentCount, flags, tempo, bpm, orders, patterns, instruments,
+    consumed: o, size: bytes.length,
+  };
+}
+
+const xmSong = compose({ style: 'lofi', mood: 'dreamy', theme: 'rain', tech: 'analog', bpm: 84, type: 'full' }, 'xm-unit-0001');
+
+test('the module has the header a player looks for', () => {
+  const x = parseXm(songToXm(xmSong));
+  eq(x.sig, 'Extended Module: ');
+  eq(x.magic, 0x1a, 'the 0x1A after the name');
+  eq(x.version, 0x0104, 'version 1.04');
+  eq(x.headerSize, 276);
+  eq(x.flags, 1, 'linear frequency table');
+  eq(x.tempo, 6, 'ticks per row');
+  eq(x.bpm, 84, 'the song tempo');
+  assert(x.name.length > 0, 'the song name travels');
+});
+
+test('the order table lists every pattern', () => {
+  const x = parseXm(songToXm(xmSong));
+  eq(x.songLen, x.patternCount);
+  eq(x.orders.join(','), Array.from({ length: x.patternCount }, (_, i) => i).join(','));
+  assert(x.patternCount >= 1, 'at least one pattern');
+});
+
+test('every pattern is well formed and packs its silence', () => {
+  const x = parseXm(songToXm(xmSong));
+  for (const p of x.patterns) {
+    eq(p.hlen, 9, 'pattern header size');
+    eq(p.rows, 64, '64 rows');
+    assert(p.size > 0 && p.size < 64 * x.channels * 5, `packed, not raw (${p.size})`);
+  }
+});
+
+test('the notes that made it in are the notes of the song', () => {
+  const x = parseXm(songToXm(xmSong));
+  const carried = x.patterns.reduce((a, p) => a + p.notes, 0);
+  // polyphony needs channels: a handful of rows where more notes stack than a
+  // track has channels are dropped rather than smeared onto a busy channel
+  assert(carried > xmSong.totalNotes * 0.98, `${carried} of ${xmSong.totalNotes} carried`);
+  assert(carried <= xmSong.totalNotes, 'and nothing is invented');
+});
+
+test('notes are transposed into module numbering', () => {
+  const x = parseXm(songToXm(xmSong));
+  const used = new Set();
+  for (const p of x.patterns) for (const i of p.instrumentsUsed) used.add(i);
+  assert([...used].every((i) => i >= 1 && i <= x.instrumentCount), `instruments ${[...used]}`);
+  assert(used.size >= 3, 'several instruments are actually played');
+});
+
+test('each instrument carries a loopable cycle or a drum hit', () => {
+  const x = parseXm(songToXm(xmSong));
+  eq(x.instrumentCount, 10, 'five pitched, five drums');
+  const pitched = x.instruments.slice(0, 5);
+  for (const inst of pitched) {
+    eq(inst.isize, 263, 'instrument header size');
+    eq(inst.nsamp, 1);
+    const s0 = inst.samples[0];
+    eq(s0.length, 32, 'one cycle of 32 samples');
+    eq(s0.loopStart, 0);
+    eq(s0.loopLength, 32, 'the whole cycle loops');
+    eq(s0.type & 0x03, 1, 'forward loop');
+    eq(s0.volume, 64);
+    assert(Math.abs(s0.finetune) <= 4, `tuned by a couple of cents (${s0.finetune})`);
+    const peak = Math.max(...Array.from(s0.data, Math.abs));
+    assert(peak > 80, `the cycle is audible, not a flat line (peak ${peak})`);
+  }
+  const drums = x.instruments.slice(5);
+  for (const inst of drums) {
+    const s0 = inst.samples[0];
+    assert(s0.length > 100, `${inst.iname} is a hit, not a cycle (${s0.length})`);
+    eq(s0.type & 0x03, 0, 'no loop on a drum');
+    assert(Math.max(...Array.from(s0.data, Math.abs)) > 10, `${inst.iname} has signal`);
+  }
+});
+
+test('sample data survives the delta encoding', () => {
+  const wave = cycleWave(7, 0);
+  const x = parseXm(songToXm(xmSong));
+  const decoded = Array.from(x.instruments[0].samples[0].data);
+  const expected = Array.from(wave, (v) => Math.max(-128, Math.min(127, Math.round(v * 127))));
+  eq(decoded.join(','), expected.join(','), 'decoded bytes equal the generated cycle');
+});
+
+test('the file ends exactly where the spec says it should', () => {
+  const x = parseXm(songToXm(xmSong));
+  eq(x.consumed, x.size, 'no trailing bytes, nothing missing');
+  assert(x.size < 60 * 1024, `small enough to email (${(x.size / 1024).toFixed(0)} KB)`);
+});
+
+test('a different song makes a different module', () => {
+  const other = compose({ style: 'edm', mood: 'uplifting', theme: 'festival', tech: 'chiptune', bpm: 128, type: 'loop' }, 'xm-unit-0002');
+  const a = songToXm(xmSong);
+  const b = songToXm(other);
+  assert(a.length !== b.length || a.join(',') !== b.join(','), 'the bytes differ');
+  const y = parseXm(b);
+  eq(y.bpm, 128);
+  eq(y.sig, 'Extended Module: ');
 });
 
 console.log(`\n${pass} passed, ${failures.length} failed\n`);

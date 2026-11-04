@@ -4,6 +4,7 @@ import { state } from '../state.js';
 import { renderSong, tempoMapOf } from '../audio/engine.js';
 import { analyseBuffer, normalisationGain, encodeWav, download } from '../export/wav.js';
 import { songToMidi } from '../export/midi.js';
+import { songToXm } from '../export/xm.js';
 import { zipStore } from '../export/zip.js';
 import { drawArtwork, shareUrl, shareUrlFor, encodeShare, encodeState, decodeState } from '../export/artwork.js';
 import { extractTheme } from '../import/midi.js';
@@ -89,6 +90,15 @@ export function exportMidi() {
     download(new Blob([bytes], { type: 'audio/midi' }), `${slug(state.song.title)}.mid`);
     toast('MIDI exported');
   } catch (err) { fail('MIDI export', err); }
+}
+
+export function exportXm() {
+  if (!state.song) return;
+  try {
+    const bytes = songToXm(state.song);
+    download(new Blob([bytes], { type: 'audio/x-xm' }), `${slug(state.song.title)}.xm`);
+    toast(`XM exported — ${Math.round(bytes.length / 1024)} KB`);
+  } catch (err) { fail('XM export', err); }
 }
 
 export function exportJson() {

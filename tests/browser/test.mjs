@@ -687,6 +687,31 @@ try {
   check('the view scrolls with the song', tracker.scrolls);
   await page.evaluate(() => document.querySelector('[data-viz="roll"]').click());
 
+  console.log('\nXM export');
+  const beforeXm = errors.length;
+  const xm = await page.evaluate(async () => {
+    const { state } = await import('./src/state.js');
+    const { songToXm } = await import('./src/export/xm.js');
+    const bytes = songToXm(state.song);
+    const head = String.fromCharCode(...bytes.slice(0, 17));
+    document.querySelector('#menu').click();
+    const btn = document.querySelector('#menu-sheet [data-act="xm"]');
+    const offered = !!btn;
+    btn?.click();
+    await new Promise((r) => setTimeout(r, 300));
+    return {
+      head, size: bytes.length, offered,
+      isBytes: bytes instanceof Uint8Array,
+      signature: String.fromCharCode(...bytes.slice(37, 38)),
+    };
+  });
+  check('the module export is offered', xm.offered);
+  check('it writes an XM file', xm.head === 'Extended Module: ', JSON.stringify(xm.head));
+  check('as bytes, not text', xm.isBytes);
+  check('with the 0x1A a player expects', xm.signature === '\u001a', JSON.stringify(xm.signature));
+  check('small enough to email', xm.size > 1000 && xm.size < 60 * 1024, `${(xm.size / 1024).toFixed(0)} KB`);
+  check('exporting raised no console errors', errors.length === beforeXm, errors.slice(beforeXm, beforeXm + 2).join(' | '));
+
   console.log('\nStems + zip');
   const stems = await page.evaluate(async () => {
     const { compose } = await import('./src/core/composer.js');
