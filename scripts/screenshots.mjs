@@ -4,6 +4,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildSite, SITE } from './build-site.mjs';
 
 // Resolve puppeteer from the project, the global install, or CHROME_PATH.
 async function loadPuppeteer() {
@@ -30,6 +31,7 @@ function launchOptions(extra = []) {
 }
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+buildSite({ quiet: true });
 const OUT = path.join(ROOT, 'docs', 'screenshots');
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -41,7 +43,7 @@ const MIME = {
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  let file = path.join(ROOT, decodeURIComponent(url.pathname));
+  let file = path.join(SITE, decodeURIComponent(url.pathname));
   if (url.pathname.endsWith('/')) file = path.join(file, 'index.html');
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404).end('not found'); return; }

@@ -5,6 +5,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildSite, SITE } from '../../scripts/build-site.mjs';
 // Resolve puppeteer from the project, the global install, or CHROME_PATH.
 async function loadPuppeteer() {
   try {
@@ -32,6 +33,9 @@ function launchOptions(extra = []) {
 }
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+// The harness serves the tree that is actually published, not the repo root,
+// so a broken link between the landing and the studio fails here too.
+buildSite({ quiet: true });
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const MIME = {
@@ -48,9 +52,9 @@ const MIME = {
 function serve() {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
-    let file = path.join(ROOT, decodeURIComponent(url.pathname));
+    let file = path.join(SITE, decodeURIComponent(url.pathname));
     if (url.pathname.endsWith('/')) file = path.join(file, 'index.html');
-    if (!file.startsWith(ROOT)) { res.writeHead(403).end(); return; }
+    if (!file.startsWith(SITE)) { res.writeHead(403).end(); return; }
     fs.readFile(file, (err, data) => {
       if (err) { res.writeHead(404).end('not found'); return; }
       res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' });
@@ -77,9 +81,15 @@ const browser = await puppeteer.launch(launchOptions());
 try {
   const page = await browser.newPage();
   await page.setViewport({ width: 430, height: 900 });
+  // Two pages share this tab: the studio, and the landing page it is reached
+  // from. Each gets its own bucket, because a console error on the landing is
+  // not an error in the studio — that mix-up once reported a missing stylesheet
+  // as "no console errors after interaction".
   const errors = [];
-  page.on('pageerror', (e) => errors.push(String(e)));
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  const landingErrors = [];
+  let capturing = errors;
+  page.on('pageerror', (e) => capturing.push(String(e)));
+  page.on('console', (m) => { if (m.type() === 'error') capturing.push(m.text()); });
 
   await page.goto(`${base}app/`, { waitUntil: 'networkidle0' });
   await page.waitForFunction(() => document.getElementById('title').textContent !== '—', { timeout: 15000 });
@@ -671,8 +681,7 @@ try {
   check('stem zip is a PK archive', stems.zipSig === 'PK');
 
   console.log('\nLanding page');
-  const landingErrors = [];
-  page.on('pageerror', (e) => landingErrors.push(String(e)));
+  capturing = landingErrors;
   await page.goto(base, { waitUntil: 'networkidle0' });
   try {
     await page.waitForFunction(
@@ -733,6 +742,7 @@ try {
   check('landing plays', landingLive.wasPlaying, landingLive.label);
   check('landing keeps playing across regenerate and seed switches', landingLive.stillPlaying, landingLive.label);
 
+  capturing = errors;
   console.log('\nInteractions');
   // the browser can detach a frame under load; one retry keeps the suite honest
   async function gotoStudio() {

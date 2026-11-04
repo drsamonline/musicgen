@@ -42,6 +42,11 @@ python3 -m http.server 8080
 # → http://localhost:8080
 ```
 
+To preview the whole site the way it is published — the landing page at `/` and the
+studio at `/app/` — run `npm run build` and serve `_site/`. The site is assembled from
+`docs/` (the page) and `app/` (the studio) at deploy time, so there is no second copy
+to drift, and `npm run build` fails if any link in it points at nothing.
+
 Then use your browser's **Install** / **Add to Home Screen** (iOS: Share → Add to Home Screen). The service worker precaches the whole shell, so after that first visit it launches and plays with the network switched off.
 
 ## What's inside
@@ -83,6 +88,7 @@ npm run budget        # shell size, precache completeness, no external requests
 npm run visual        # pixel-diff the studio against committed baselines
 npm run shots         # regenerate docs/screenshots
 npm run audit         # axe + app checks, light and dark
+npm run build         # assemble _site/ exactly as GitHub Pages publishes it
 ```
 
 The suite asserts, rather than claims:
