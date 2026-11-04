@@ -1,7 +1,7 @@
 // Generation: history, the compose call itself, and the three readouts that
 // describe a song (meta line, section timeline, screen-reader summary).
 import { state, persist, emit } from '../state.js';
-import { compose, DEFAULT_PRESETS, normalisePresets } from '../core/composer.js';
+import { compose, render, DEFAULT_PRESETS, normalisePresets } from '../core/composer.js';
 import { tempoMapOf } from '../audio/engine.js';
 import { describeTempo } from '../core/tempo.js';
 import { validateSong } from '../core/validate.js';
@@ -48,7 +48,12 @@ export function generate({ keepPosition = false, announce = true } = {}) {
   if (wasPlaying) { app.player.pause(); els.play.textContent = '▶'; }
   try {
     const t0 = performance.now();
-    state.song = compose(state.presets, state.seed);
+    // A plan is only good for the presets and seed it came from. If either has
+    // moved, the edit is stale and the seed generates the song.
+    const source = `${JSON.stringify(state.presets)}|${state.seed}`;
+    const usePlan = state.plan && state.planSource === source;
+    if (!usePlan) { state.plan = null; state.planSource = null; }
+    state.song = usePlan ? render(state.plan) : compose(state.presets, state.seed);
     const ms = Math.round(performance.now() - t0);
     const check = validateSong(state.song);
     renderMeta(ms, check);

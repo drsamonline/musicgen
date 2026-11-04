@@ -641,24 +641,34 @@ function makeTitle(rng, theme) {
 }
 
 // ============================================================= compose
-export function compose(rawPresets, seed) {
+// ------------------------------------------------------------------ the plan
+//
+// A song is two things: the decisions, and the notes those decisions produce.
+// `plan()` makes the decisions — key, form, chords, voicing, theme, tempo — and
+// returns plain JSON. `render()` turns that into scheduled notes. `compose()` is
+// the two together, so every existing caller keeps working unchanged.
+//
+// The point of the split is that the plan is a *value*: you can print it, carry
+// it in a share link, or change one chord and hear the same song with that
+// chord. Every stage draws from its own named RNG fork and `fork()` never
+// advances its parent, which is why cutting the pipeline in two here does not
+// move a single note.
+export const PLAN_VERSION = 1;
+
+const KEY_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+export function plan(rawPresets, seed) {
   const presets = normalisePresets(rawPresets);
   const style = { ...STYLES[presets.style], ...(STYLE_EXTRAS[presets.style] || {}) };
   const mood = MOODS[presets.mood];
-  const theme = THEMES[presets.theme];
-  const tech = TECHS[presets.tech];
-  const type = TYPES[presets.type];
 
   const rng = new Rng(seed);
   const { tonic, mode } = chooseKey(rng.fork('key'), mood, presets);
   const scaleName = mode;
   const beatsPerBar = presets.timeSig[0];
 
-  const sections = buildForm(rng.fork('form'), presets.type, presets);
+  const form = buildForm(rng.fork('form'), presets.type, presets);
   const intensityCurve = style.intensity;
-
-  const tracks = { drums: [], bass: [], chords: [], lead: [], pad: [], arp: [], bed: [] };
-  const songSections = [];
 
   // One theme for the whole song, in the home key: every section derives from
   // it, which is what makes a piece sound composed rather than assembled.
@@ -666,14 +676,10 @@ export function compose(rawPresets, seed) {
     ? normaliseTheme(presets.themeSeed, tonic, scaleName)
     : buildTheme(rng.fork('theme'), { beatsPerBar, tonic, scaleName, mood });
 
-  let barCursor = 0;
-  let prevProg = null;
-  let prevVoicing = null;
-
   // Section aliasing: a repeated section reuses the first one's musical
   // material, so the second verse is a variation rather than a new tune.
   const firstNameIndex = {};
-  sections.forEach((sec, i) => {
+  form.forEach((sec, i) => {
     if (firstNameIndex[sec.name] == null) firstNameIndex[sec.name] = i;
   });
 
@@ -681,20 +687,16 @@ export function compose(rawPresets, seed) {
   // change" or a pivot). Kept per section so the validator can follow it.
   const modChance = style.modulation ?? 0.12;
   let sectionTonic = tonic;
+  let barCursor = 0;
+  let prevProg = null;
+  let prevVoicing = null;
 
-  // A locked track draws from a stream seeded ONLY by the lock, so a new
-  // song seed cannot change it.
-  const trackRng = (name, fallback) => {
-    const locked = presets.lockTracks?.[name] && presets.trackSeeds?.[name];
-    return locked ? new Rng(`locked|${name}|${presets.trackSeeds[name]}`) : fallback;
-  };
+  const sections = [];
+  const aliases = [];
 
-  sections.forEach((sec, si) => {
+  form.forEach((sec, si) => {
     const aliasIndex = firstNameIndex[sec.name] ?? si;
-    const rngS = rng.fork('section' + aliasIndex);
-    const isLast = si === sections.length - 1;
 
-    // lift the key on a section boundary, once per song
     if (si > 0 && rng.fork('mod' + si).chance(modChance)) {
       sectionTonic = (tonic + (rng.fork('modstep' + si).chance(0.6) ? 2 : 5)) % 12;
     }
@@ -708,16 +710,7 @@ export function compose(rawPresets, seed) {
       key: { tonic: sTonic, mode: scaleName },
     };
 
-    const ctx = {
-      tonic: sTonic, scaleName, beatsPerBar, mood, barStart: barCursor * beatsPerBar,
-      bassRoot: null,
-      theme: songTheme,
-      sectionName: sec.name,
-      grooveOverride: presets.grooveOverride || null,
-      polyrhythm: false, // set per section from the drum stream below
-    };
-
-    const { chords, prog } = sectionChords(rngS.fork('harmony'), style, mood, section, {
+    const { chords, prog } = sectionChords(rng.fork('section' + aliasIndex).fork('harmony'), style, mood, section, {
       tonic: sTonic, mode, beatsPerBar, prevProg, scaleName,
     });
     prevProg = prog;
@@ -736,8 +729,155 @@ export function compose(rawPresets, seed) {
     section.chords = voiced.map((c) => ({
       bar: barCursor + c.bar, rootPc: c.rootPc, quality: c.quality,
       symbol: c.symbol, roman: c.roman, voicing: c.voicing,
-      pcs: chordPcs(c),
+      pcs: chordPcs(c), intervals: c.intervals,
     }));
+
+    sections.push(section);
+    aliases.push(aliasIndex);
+    barCursor += sec.bars;
+  });
+
+  const tempoMap = buildTempo(rng.fork('tempo'), style, mood, presets, form, beatsPerBar);
+
+  return {
+    v: 1,
+    planVersion: PLAN_VERSION,
+    composerVersion: COMPOSER_VERSION,
+    seed: String(seed),
+    presets,
+    key: { tonic, mode, name: `${KEY_NAMES[tonic]} ${mode}` },
+    bpm: presets.bpm,
+    timeSig: presets.timeSig,
+    beatsPerBar,
+    bars: barCursor,
+    totalBeats: barCursor * beatsPerBar,
+    tempo: { base: presets.bpm, drift: tempoMap.drift },
+    theme: songTheme,
+    sections,
+    aliases,
+    variant: presets.variant ?? rng.fork('variant').int(3),
+  };
+}
+
+// A plan can arrive from three places: `plan()` itself, a share link, or a
+// person who moved a section or swapped a chord. Normalise all three into the
+// shape `render()` expects, rebasing bar numbers so a reordered plan still
+// lines up with the tempo map.
+export function normalisePlan(raw) {
+  const p = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  if (!p || typeof p !== 'object') throw new Error('plan: not an object');
+  if (!Array.isArray(p.sections) || p.sections.length === 0) throw new Error('plan: no sections');
+  if (!p.presets || !p.key) throw new Error('plan: incomplete');
+
+  const presets = normalisePresets(p.presets);
+  const beatsPerBar = p.beatsPerBar || presets.timeSig[0];
+  const homeTonic = ((p.key.tonic ?? 0) | 0) % 12;
+
+  let bar = 0;
+  const sections = p.sections.map((s, i) => {
+    const startBar = bar;
+    const bars = Math.max(1, Math.round(Number(s.bars ?? 4)));
+    const from = Number(s.bar ?? 0);
+    const sec = {
+      name: String(s.name ?? 'verse'),
+      index: i,
+      bar: startBar,
+      bars,
+      intensity: clamp01(Number(s.intensity ?? 0.6)),
+      key: {
+        tonic: ((s.key?.tonic ?? homeTonic) | 0) % 12,
+        mode: s.key?.mode ?? p.key.mode,
+      },
+      chords: (Array.isArray(s.chords) ? s.chords : []).map((c) => ({
+        bar: startBar + (Number(c.bar ?? 0) - from),
+        rootPc: ((c.rootPc ?? 0) | 0) % 12,
+        quality: c.quality ?? 'maj',
+        symbol: c.symbol ?? '',
+        roman: c.roman ?? '',
+        voicing: Array.isArray(c.voicing) ? c.voicing.map(Number) : [],
+        pcs: Array.isArray(c.pcs) ? c.pcs.map(Number) : chordPcs({ rootPc: ((c.rootPc ?? 0) | 0) % 12, quality: c.quality ?? 'maj' }),
+        intervals: c.intervals ?? CHORD_INTERVALS[c.quality ?? 'maj'],
+      })),
+    };
+    if (!sec.chords.length) {
+      // a section with no harmony cannot be rendered; give it the tonic triad
+      sec.chords.push({
+        bar: startBar, rootPc: sec.key.tonic, quality: 'maj', symbol: '',
+        roman: 'I', voicing: [48 + sec.key.tonic, 52 + sec.key.tonic, 55 + sec.key.tonic],
+        pcs: chordPcs({ rootPc: sec.key.tonic, quality: 'maj' }),
+        intervals: CHORD_INTERVALS.maj,
+      });
+    }
+    bar += bars;
+    return sec;
+  });
+
+  return {
+    ...p,
+    presets,
+    beatsPerBar,
+    bars: bar,
+    totalBeats: bar * beatsPerBar,
+    sections,
+    aliases: sections.map((s, i) => p.aliases?.[i] ?? i),
+    seed: String(p.seed ?? 'seed'),
+  };
+}
+
+// The plan's chords carry `intervals` so the bass knows the real shape of the
+// chord; the Song keeps the smaller public shape it has always had.
+function songChords(chords) {
+  return chords.map((c) => ({
+    bar: c.bar, rootPc: c.rootPc, quality: c.quality,
+    symbol: c.symbol, roman: c.roman, voicing: c.voicing,
+    pcs: c.pcs,
+  }));
+}
+
+export function render(rawPlan) {
+  const planObj = normalisePlan(rawPlan);
+  const { presets, beatsPerBar, seed } = planObj;
+  const style = { ...STYLES[presets.style], ...(STYLE_EXTRAS[presets.style] || {}) };
+  const mood = MOODS[presets.mood];
+  const theme = THEMES[presets.theme];
+  const tech = TECHS[presets.tech];
+  const songTheme = planObj.theme;
+  const { tonic, mode } = planObj.key;
+
+  const rng = new Rng(seed);
+  // The tempo map is a pure function of the sections' names and lengths, so it
+  // is rebuilt here rather than trusted from the plan: a reordered plan gets a
+  // tempo map that matches it.
+  const tempoMap = buildTempo(rng.fork('tempo'), style, mood, presets, planObj.sections, beatsPerBar);
+
+  const tracks = { drums: [], bass: [], chords: [], lead: [], pad: [], arp: [], bed: [] };
+  const songSections = [];
+
+  // A locked track draws from a stream seeded ONLY by the lock, so a new
+  // song seed cannot change it.
+  const trackRng = (name, fallback) => {
+    const locked = presets.lockTracks?.[name] && presets.trackSeeds?.[name];
+    return locked ? new Rng(`locked|${name}|${presets.trackSeeds[name]}`) : fallback;
+  };
+
+  planObj.sections.forEach((section, si) => {
+    const sec = section;
+    const aliasIndex = planObj.aliases[si] ?? si;
+    const rngS = rng.fork('section' + aliasIndex);
+    const isLast = si === planObj.sections.length - 1;
+    const barCursor = sec.bar;
+    const sTonic = sec.key.tonic;
+    const intensity = sec.intensity;
+    const voiced = sec.chords;
+
+    const ctx = {
+      tonic: sTonic, scaleName: mode, beatsPerBar, mood, barStart: barCursor * beatsPerBar,
+      bassRoot: null,
+      theme: songTheme,
+      sectionName: sec.name,
+      grooveOverride: presets.grooveOverride || null,
+      polyrhythm: false, // set per section from the drum stream below
+    };
 
     const mask = TYPE_TRACK_MASK[presets.type];
     let allowed = SECTION_TRACKS[sec.name] || ['drums', 'bass', 'chords', 'lead'];
@@ -794,9 +934,9 @@ export function compose(rawPresets, seed) {
     }
     if (allowed.includes('lead')) {
       const rngL = trackRng('lead', rng.fork('lead'));
-      const leadNotes = leadSection(rngL, style, ctx, section, voiced);
+      const leadNotes = leadSection(rngL, style, ctx, sec, voiced);
       tracks.lead.push(...leadNotes);
-      section.leadNotes = leadNotes;
+      sec.leadNotes = leadNotes;
       // doubling: rock/folk/chiptune often want the lead an octave up
       if ((style.doubleLead ?? 0) > 0 && rngS.chance(style.doubleLead)) {
         for (const n of leadNotes) {
@@ -806,7 +946,7 @@ export function compose(rawPresets, seed) {
     }
     if (allowed.includes('pad')) {
       const rngP = rngS.fork('pad');
-      tracks.pad.push(...padSection(rngP, ctx, section, voiced, section.leadNotes || []));
+      tracks.pad.push(...padSection(rngP, ctx, sec, voiced, sec.leadNotes || []));
     }
     const bedTexture = textureFor(presets.theme, style, rng.fork('tex' + si), presets.texture ?? 'auto');
     const wantsBed = presets.texture === 'none'
@@ -824,7 +964,7 @@ export function compose(rawPresets, seed) {
     }
     if (presets.arp && allowed.includes('chords')) {
       const rngA = rngS.fork('arp');
-      tracks.arp.push(...arpSection(rngA, ctx, section, voiced));
+      tracks.arp.push(...arpSection(rngA, ctx, sec, voiced));
     }
 
     if (isLast && sec.bars >= 4) {
@@ -840,8 +980,7 @@ export function compose(rawPresets, seed) {
       }
     }
 
-    songSections.push({ ...section, chords: section.chords });
-    barCursor += sec.bars;
+    songSections.push({ ...sec, chords: songChords(sec.chords) });
   });
 
   // humanise each track with its own stream (locked tracks keep theirs too)
@@ -854,9 +993,8 @@ export function compose(rawPresets, seed) {
     tracks[k].sort((a, b) => a.t - b.t);
   }
 
-  const totalBars = barCursor;
+  const totalBars = planObj.bars;
   const totalBeats = totalBars * beatsPerBar;
-  const tempoMap = buildTempo(rng.fork('tempo'), style, mood, presets, sections, beatsPerBar);
   const durationSec = tempoMap.secondsAt(totalBeats);
 
   const fx = {
@@ -871,7 +1009,7 @@ export function compose(rawPresets, seed) {
     seed: String(seed),
     presets,
     title: makeTitle(rng.fork('title'), theme),
-    key: { tonic, mode, name: `${['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'][tonic]} ${mode}` },
+    key: { tonic, mode, name: `${KEY_NAMES[tonic]} ${mode}` },
     bpm: presets.bpm,
     bpmRange: [tempoMap.min, tempoMap.max],
     tempo: {
@@ -899,11 +1037,16 @@ export function compose(rawPresets, seed) {
     theme: songTheme,
     transitions: collectTransitions(songSections, style, mood, tempoMap, beatsPerBar),
     width: style.width ?? 0.4,
-    variant: presets.variant ?? rng.fork('variant').int(3),
+    variant: planObj.variant ?? presets.variant ?? rng.fork('variant').int(3),
     tuning: presets.microtuning ? { cents: justIntonationCents(tonic, mode) } : null,
     palette: theme.palette,
     totalNotes: Object.values(tracks).reduce((a, t) => a + t.length, 0),
   };
+}
+
+// The whole song from presets and a seed: plan, then render.
+export function compose(rawPresets, seed) {
+  return render(plan(rawPresets, seed));
 }
 
 // Which ambience sits under a section: the theme says what the song is about,

@@ -838,3 +838,91 @@ a:focus-visible,
 }
 
 .lock-spacer { width: 34px; height: 34px; }
+
+/* ------------------------------------------------------------------ plan
+   The decisions behind the song, open for inspection and editing. It stays
+   collapsed by default: the one-tap audience never has to meet it, and the
+   person who wants the arrangement does. */
+.plan {
+  margin: 10px 0 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r, 12px);
+  background: var(--panel);
+  overflow: hidden;
+}
+.plan > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.86rem;
+  color: var(--text);
+}
+.plan > summary::-webkit-details-marker { display: none; }
+.plan > summary::before {
+  content: '▸';
+  color: var(--dim);
+  font-size: 0.7rem;
+  transition: transform 140ms var(--ease, ease);
+}
+.plan[open] > summary::before { transform: rotate(90deg); }
+.plan-title { font-weight: 600; letter-spacing: 0.02em; }
+.plan > summary .chip { font-size: 0.72rem; color: var(--muted); }
+.plan-body { padding: 0 12px 12px; }
+.plan-hint {
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--muted);
+  max-width: 60ch;
+}
+.plan-sections { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.plan-sec {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: 'head tools' 'chords chords';
+  gap: 4px 10px;
+  align-items: center;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-2);
+}
+.plan-sec-head { grid-area: head; display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.plan-name { font-size: 0.82rem; font-weight: 600; }
+.plan-bars, .plan-key { font-size: 0.72rem; color: var(--dim); }
+.plan-tools { grid-area: tools; display: flex; gap: 2px; }
+.plan-chords { grid-area: chords; display: flex; flex-wrap: wrap; gap: 4px; }
+.chord {
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  transition: background 120ms var(--ease, ease), border-color 120ms var(--ease, ease);
+}
+.chord:hover { background: var(--accent-soft); }
+.chord:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ghost.tiny {
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0 6px;
+  font-size: 0.8rem;
+  line-height: 1;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+}
+.ghost.tiny:hover { background: var(--hover); color: var(--text); }
+.plan-foot { display: flex; gap: 8px; margin-top: 10px; }
+
+@media (max-width: 560px) {
+  .plan-sec { grid-template-columns: 1fr; grid-template-areas: 'head' 'tools' 'chords'; }
+  .plan-tools { flex-wrap: wrap; }
+}
