@@ -128,6 +128,14 @@ await auditPage('studio plan open (dark)', {
   url: `${base}app/`, theme: 'dark', width: 1200, height: 900,
   prepare: (page) => page.evaluate(() => { document.querySelector('details.plan').open = true; }),
 });
+await auditPage('studio health (dark)', {
+  url: `${base}app/`, theme: 'dark',
+  prepare: (page) => page.evaluate(() => document.getElementById('health-dialog').showModal()),
+});
+await auditPage('studio health (light)', {
+  url: `${base}app/`, theme: 'light',
+  prepare: (page) => page.evaluate(() => document.getElementById('health-dialog').showModal()),
+});
 await auditPage('studio plan open (light)', {
   url: `${base}app/`, theme: 'light',
   prepare: (page) => page.evaluate(() => { document.querySelector('details.plan').open = true; }),

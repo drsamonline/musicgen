@@ -901,6 +901,108 @@ try {
   check('resetting returns to the seed', reset.bars === planUi.bars && !reset.edited, `${reset.bars} bars`);
   check('and the plan is the seed\'s plan again', reset.matchesSeed);
 
+  console.log('\nAudio health');
+  const hud = await page.evaluate(async () => {
+    // make some noise first so the counters have something to count — but
+    // only start it if it is stopped: #play is a toggle, and the plan tests
+    // above may have left it running
+    if (!globalThis.__musicgen?.app?.player?.playing) document.getElementById('play').click();
+    await new Promise((r) => setTimeout(r, 1200));
+    document.querySelector('#menu').click();
+    document.querySelector('#menu-sheet [data-act="health"]').click();
+    await new Promise((r) => setTimeout(r, 700));
+    const rows = [...document.querySelectorAll('#health-body dt')].map((d) => d.textContent);
+    return {
+      open: document.getElementById('health-dialog').open,
+      verdict: document.getElementById('health-verdict').textContent,
+      level: document.getElementById('health-verdict').dataset.level,
+      rows,
+      body: document.getElementById('health-body').textContent,
+      health: globalThis.__musicgen?.app?.player?.health,
+      ctxState: globalThis.__musicgen?.app?.player?.ctx?.state,
+      playing: globalThis.__musicgen?.app?.player?.playing,
+    };
+  });
+  check('the health panel opens', hud.open);
+  check('the transport was actually playing', hud.playing === true);
+  check('and says something about the audio', hud.verdict.length > 10, hud.verdict);
+  check('the context is running', hud.ctxState === 'running', String(hud.ctxState));
+  check('the scheduler ticked', (hud.health?.ticks ?? 0) > 0, `${hud.health?.ticks} ticks`);
+  check('it reports the audio-thread clock', /audio thread/.test(hud.body), hud.body.slice(0, 80));
+  check('it lists the counters', hud.rows.includes('Voices') && hud.rows.includes('Rebuilds'), hud.rows.join(','));
+  check('no stall was invented', (hud.health?.stalls ?? 0) === 0, `${hud.health?.stalls} stalls`);
+
+  const rebuilt = await page.evaluate(async () => {
+    const app = globalThis.__musicgen.app;
+    const before = {
+      ctx: app.player.ctx,
+      position: app.player.position,
+      recoveries: app.player.health.recoveries,
+      playing: app.player.playing,
+    };
+    document.getElementById('health-rebuild').click();
+    await new Promise((r) => setTimeout(r, 2500));
+    return {
+      newContext: app.player.ctx !== before.ctx,
+      ctxState: app.player.ctx?.state,
+      playing: app.player.playing,
+      positionBefore: before.position,
+      position: app.player.position,
+      recoveries: app.player.health.recoveries,
+      hasGraph: !!app.player.graph?.master,
+      hasSchedule: typeof app.player.schedule === 'function',
+      hudVerdict: document.getElementById('health-verdict').textContent,
+    };
+  });
+  check('rebuilding swaps the audio context', rebuilt.newContext);
+  check('the new context runs', rebuilt.ctxState === 'running', String(rebuilt.ctxState));
+  check('and the song is still playing', rebuilt.playing);
+  check('with a graph and a scheduler', rebuilt.hasGraph && rebuilt.hasSchedule);
+  check('the rebuild was counted', rebuilt.recoveries >= 1, `${rebuilt.recoveries}`);
+  check('and it did not jump back to the start',
+    rebuilt.position >= Math.max(0, rebuilt.positionBefore - 1.5),
+    `${rebuilt.positionBefore.toFixed(2)} -> ${rebuilt.position.toFixed(2)}`);
+  check('the panel reflects the new context', /running|kHz|tick/i.test(rebuilt.hudVerdict), rebuilt.hudVerdict);
+
+  // The automatic path: a context that reports "running" while its clock has
+  // stopped. Nothing in `state` reveals this, which is why it went unnoticed
+  // on real phones. Freeze `currentTime` and the stall detector must rebuild
+  // on its own, without anyone pressing a button.
+  const stalled = await page.evaluate(async () => {
+    const app = globalThis.__musicgen.app;
+    const p = app.player;
+    if (!p.playing) document.getElementById('play').click();
+    await new Promise((r) => setTimeout(r, 700));
+    const before = { ctx: p.ctx, recoveries: p.health.recoveries, stalls: p.health.stalls };
+    const frozen = p.ctx.currentTime;
+    Object.defineProperty(p.ctx, 'currentTime', { configurable: true, get: () => frozen });
+    await new Promise((r) => setTimeout(r, 2400));
+    return {
+      stalledCtx: before.ctx,
+      newContext: p.ctx !== before.ctx,
+      stalls: p.health.stalls - before.stalls,
+      recoveries: p.health.recoveries - before.recoveries,
+      last: p.health.lastRecovery,
+      playing: p.playing,
+      state: p.ctx?.state,
+      position: p.position,
+    };
+  });
+  check('a frozen audio clock is detected', stalled.stalls >= 1, `${stalled.stalls} stalls`);
+  check('and the player rebuilds itself', stalled.newContext && stalled.recoveries >= 1, stalled.last);
+  check('the automatic recovery is labelled as a stall', stalled.last === 'stalled', String(stalled.last));
+  check('and playback comes back on its own', stalled.playing && stalled.state === 'running');
+  check('without losing the position', stalled.position > 0.2, stalled.position.toFixed(2));
+
+  const afterRebuild = await page.evaluate(async () => {
+    document.getElementById('health-reset').click();
+    await new Promise((r) => setTimeout(r, 600));
+    return { ticks: globalThis.__musicgen.app.player.health.ticks, recoveries: globalThis.__musicgen.app.player.health.recoveries };
+  });
+  check('counters reset on demand', afterRebuild.recoveries === 0);
+
+  await page.evaluate(() => { document.getElementById('health-dialog').close(); });
+
   await page.screenshot({ path: path.join(ROOT, 'tests', 'browser', 'screenshot.png'), fullPage: true });
 } finally {
   await browser.close();

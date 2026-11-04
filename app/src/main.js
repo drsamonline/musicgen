@@ -4,6 +4,7 @@ import { state, loadState, persist, subscribe } from './state.js';
 import { DEFAULT_PRESETS, normalisePresets, normalisePlan } from './core/composer.js';
 import { decodeShare } from './export/artwork.js';
 import { wirePlan, renderPlanPanel, sourceOf } from './ui/plan.js';
+import { openHealth, closeHealth, rebuildAudio, resetHealth } from './ui/health.js';
 import { els, app, $, toast, notice, fail, VIZ_MODES, THEME_MODES } from './ui/ctx.js';
 import { buildSelects, syncControls, wirePresets, renderGroove, toggleMute, doRandom, doEvolve, doMutate } from './ui/dials.js';
 import { generate, renderMeta, renderSections, renderSummary } from './ui/generate.js';
@@ -46,6 +47,7 @@ function wireActions() {
     if (act === 'undo') undo();
     if (act === 'redo') redo();
     if (act === 'library') openLibrary();
+    if (act === 'health') openHealth();
     if (act === 'exportlib') exportLibrary();
     if (act === 'record') toggleRecord();
     if (act === 'importmidi') els.midiinput.click();
@@ -140,6 +142,11 @@ async function boot() {
   wireRoll();
   wireInstall();
   wirePlan();
+  els.healthRebuild?.addEventListener('click', rebuildAudio);
+  els.healthReset?.addEventListener('click', resetHealth);
+  // the HUD polls only while it is open
+  els.healthDialog?.addEventListener('close', closeHealth);
+  els.healthDialog?.addEventListener('cancel', closeHealth);
   renderGroove();
   subscribe(() => syncControls());
   // the plan panel follows the song: a new seed, a preset change, an undo or a

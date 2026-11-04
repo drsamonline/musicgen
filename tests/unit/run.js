@@ -18,6 +18,7 @@ import { makeTempoMap, flatTempo, describeTempo } from '../../app/src/core/tempo
 import { extractTheme, parseMidi } from '../../app/src/import/midi.js';
 import { randomPresets } from '../../app/src/presets/compatibility.js';
 import { zipStore, crc32 } from '../../app/src/export/zip.js';
+import { makeHealth, noteTick, noteEvent, noteSkip, noteRecovery, report, verdict, LATE_MS, STALL_MS } from '../../app/src/audio/health.js';
 
 let pass = 0;
 const failures = [];
@@ -621,6 +622,110 @@ test('a plan from a stranger is normalised, not trusted', () => {
   let threw = false;
   try { normalisePlan({ presets: PLAN_PRESETS, key: { tonic: 0, mode: 'major' }, sections: [] }); } catch { threw = true; }
   assert(threw, 'an empty plan is refused');
+});
+
+
+// ------------------------------------------------------------ audio health
+test('a fresh health record is empty', () => {
+  const r = report(makeHealth(), {});
+  eq(r.ticks, 0);
+  eq(r.state, 'none');
+  eq(r.stalls, 0);
+  eq(verdict(r).level, 'idle');
+});
+
+test('ticks advance and record the worst gap', () => {
+  const h = makeHealth();
+  noteTick(h, 1.0, 1000);
+  noteTick(h, 1.03, 1025);
+  noteTick(h, 1.06, 1080);
+  const r = report(h, {});
+  eq(r.ticks, 3);
+  eq(r.maxGapMs, 55, 'worst wall-clock gap');
+});
+
+test('a frozen audio clock is a stall, and is reported once', () => {
+  const h = makeHealth();
+  let now = 1000;
+  noteTick(h, 5, now);
+  let stalls = 0;
+  for (let i = 0; i < 40; i++) {
+    now += 100;                       // wall time moves
+    if (noteTick(h, 5, now)) stalls++;  // audio time does not
+  }
+  assert(stalls >= 1, 'the stall must be noticed');
+  assert(stalls <= 3, `one report per stall, not one per tick (got ${stalls})`);
+  eq(report(h, {}).stalls, stalls);
+});
+
+test('a moving clock never stalls', () => {
+  const h = makeHealth();
+  let stalls = 0;
+  for (let i = 0; i < 60; i++) {
+    if (noteTick(h, 5 + i * 0.05, 1000 + i * 100)) stalls++;
+  }
+  eq(stalls, 0);
+  eq(report(h, {}).stalls, 0);
+});
+
+test('only notes later than the threshold count as late', () => {
+  const h = makeHealth();
+  noteEvent(h, (LATE_MS - 5) / 1000);
+  eq(report(h, {}).late, 0, 'sub-threshold lateness is inaudible');
+  noteEvent(h, (LATE_MS + 30) / 1000);
+  const r = report(h, {});
+  eq(r.late, 1);
+  assert(r.maxLateMs >= LATE_MS + 29, `worst lateness recorded: ${r.maxLateMs}`);
+});
+
+test('skipped notes and recoveries are counted', () => {
+  const h = makeHealth();
+  noteSkip(h);
+  noteSkip(h);
+  noteRecovery(h, 'stalled');
+  const r = report(h, {});
+  eq(r.skipped, 2);
+  eq(r.recoveries, 1);
+  eq(r.lastRecovery, 'stalled');
+});
+
+test('the report reads a live graph without throwing', () => {
+  const r = report(makeHealth(), {
+    ctx: { state: 'running', sampleRate: 48000, baseLatency: 0.005 },
+    graph: { cap: { active: [1, 2, 3], max: 32, stolen: 1, dropped: 0 } },
+    clock: 'worklet', playing: true, song: { totalNotes: 900 },
+  });
+  eq(r.state, 'running');
+  eq(r.voices.active, 3);
+  eq(r.voices.max, 32);
+  eq(r.clock, 'worklet');
+  eq(r.notes, 900);
+  eq(verdict(r).level, 'ok');
+});
+
+test('a closed context is bad, a suspended one is a warning', () => {
+  eq(verdict({ state: 'closed' }).level, 'bad');
+  eq(verdict({ state: 'suspended' }).level, 'warn');
+  eq(verdict({ state: 'interrupted' }).level, 'warn');
+});
+
+test('late notes make the verdict a warning, not a failure', () => {
+  const v = verdict({
+    state: 'running', sampleRate: 48000, latencyMs: 5, ticks: 10, maxGapMs: 3,
+    late: 4, maxLateMs: 40, skipped: 1, stalls: 0, recoveries: 0,
+    voices: { active: 1, max: 32, stolen: 0, dropped: 0 },
+  });
+  eq(v.level, 'warn');
+  assert(/late note/.test(v.line), v.line);
+});
+
+test('a stall outranks everything', () => {
+  const v = verdict({
+    state: 'running', sampleRate: 48000, latencyMs: 5, ticks: 10, maxGapMs: 3,
+    late: 0, maxLateMs: 0, skipped: 0, stalls: 2, recoveries: 2,
+    voices: { active: 0, max: 32, stolen: 0, dropped: 0 },
+  });
+  eq(v.level, 'bad');
 });
 
 console.log(`\n${pass} passed, ${failures.length} failed\n`);
