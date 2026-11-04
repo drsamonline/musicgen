@@ -7,7 +7,7 @@
 [![license: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-c6f24e.svg)](LICENSE)
 [![dependencies: 0](https://img.shields.io/badge/dependencies-0-9aa8ff.svg)](#)
 [![tempo: 20–500 BPM](https://img.shields.io/badge/tempo-20--500%20BPM-9aa8ff.svg)](#)
-[![size: 106 KB gzipped](https://img.shields.io/badge/size-106%20KB%20gzipped-9aa8ff.svg)](#)
+[![size: 108 KB gzipped](https://img.shields.io/badge/size-108%20KB%20gzipped-9aa8ff.svg)](#)
 [![PWA: offline-first](https://img.shields.io/badge/PWA-offline--first-c6f24e.svg)](#)
 [![web audio api](https://img.shields.io/badge/web%20audio-api-ff9f6b.svg)](#)
 
@@ -53,7 +53,7 @@ Then use your browser's **Install** / **Add to Home Screen** (iOS: Share → Add
 
 **The composer** — eleven stages, each testable: key and mode → harmonic grid (2nd-order Markov over style progressions, modal interchange) → voicing with a voice-leading solver → bass → drums (groove templates, Euclidean layers, phrase fills) → motif → development transforms → pad and counter-line → arp → humanise → tension curve.
 
-**The plan** — a song is two things: the decisions and the notes they produce. `plan(presets, seed)` returns the decisions as plain JSON — key, form, the chord under every bar, the theme, the tempo map — and `render(plan)` turns them into notes. `compose()` is the two together, and the split changed not one note: 330 preset × mood × seed combinations were hashed before and after it. The **Plan** panel in the studio opens that object up: reorder a section, repeat the chorus, change how many bars the intro runs, click a chord to change its quality. Every edit re-renders from the same seed, and the seed still reproduces the original. An edited song carries its plan in the share link — deflated, about 1.6 KB — so the link still hands over the song you heard rather than the one the seed would have made.
+**The plan** — a song is two things: the decisions and the notes they produce. `plan(presets, seed)` returns the decisions as plain JSON — key, form, the chord under every bar, the theme, the tempo map — and `render(plan)` turns them into notes. `compose()` is the two together, and the split changed not one note: 330 preset × mood × seed combinations were hashed before and after it. The **Plan** panel in the studio opens that object up: reorder a section, repeat the chorus, change how many bars the intro runs, click a chord to change its quality. Every edit re-renders from the same seed, and the seed still reproduces the original. The drum pattern of any section is editable too, in a five-voice step sequencer. An edited song carries its plan in the share link — deflated, about 1.6 KB — so the link still hands over the song you heard rather than the one the seed would have made.
 
 **The presets** — every axis has a **None**: no genre, no mood bias, no theme, no form, plain sine tones — so you can strip the song back to the notes and add only what you want. 11 styles, 10 moods, 10 themes, 8 song types, 7 synthesis technologies, plus a compatibility table that maps styles to allowed moods and engines. Tempo is a **map, not a number**: choruses lift, verses settle, every phrase gets a little rubato and the last two bars ease off, so a song breathes instead of clicking along. The BPM dial sets the centre and *Tempo drift* sets how far it may wander (0–35%). Range: **20–500 BPM**; per-track locks freeze the drums or the melody while you reroll everything else. Every share link carries the composer version, so an old seed can tell you it will sound different instead of silently lying.
 
@@ -68,6 +68,14 @@ Then use your browser's **Install** / **Add to Home Screen** (iOS: Share → Add
 **The module file** — a WAV keeps the sound and loses the editability; a MIDI keeps the notes and loses the timbre. An `.XM` keeps both in about 26 KB: it opens in OpenMPT, VLC or any tracker, and it carries its own instruments. MusicGen has no samples, so they are generated — one 32-sample single cycle per pitched track, built from the harmonic series of the song's synthesis technology, and one short percussive hit per drum voice. Polyphony needs channels, so the writer allocates pools rather than one channel per track: a four-note chord voicing on a single tracker channel would lose three notes of every four. The format is written from its specification, not from any tracker's source, since the trackers are GPL-family and this app is not.
 
 **The platform bits** — installable PWA with a real install prompt and an offline badge, MediaSession metadata with generated artwork, screen Wake Lock, gamepad and MIDI-in control, five views (piano roll, tracker grid, spectrum, waveform, generative art), a piano roll you can zoom, pan and scrub, section looping, A/B against the previous song, undo/redo, a library with search/rename/duplicate, session restore, a text song summary for screen readers, `prefers-reduced-motion` and `prefers-color-scheme` support, and a strict CSP (`default-src 'self'`) with zero runtime fetches.
+
+## Drum editing
+
+The Plan panel's ▦ button opens a step sequencer for one section: five voices of sixteen steps, showing the pattern that is actually playing. Click a step to take it over; **Back to generated** hands the section back to the seed.
+
+Two rules keep it honest. The grid you see is read from the song you can hear, not from the plan — the plan only stores what was *changed*, so an untouched section still shows what the generator wrote. And the first click on a section captures the whole lane for that voice before flipping one step, so the rest of the pattern doesn't move under your hand.
+
+A hand-written lane replaces the generated one **for that voice only**: writing kicks leaves the snares, hats, claps and toms alone. The generator still runs for every section — its random draws are part of every other voice's determinism — and the overridden voice is filtered out afterwards. Which is why a plan with no lanes still renders byte-identical songs: 330 preset × mood × seed combinations were hashed before and after this change.
 
 ## Controllers
 
@@ -101,8 +109,8 @@ npm run audit
 ## Tests
 
 ```bash
-npm test              # 93 unit tests, no browser needed
-npm run test:browser  # 170 tests in real Chromium with real Web Audio
+npm test              # 103 unit tests, no browser needed
+npm run test:browser  # 177 tests in real Chromium with real Web Audio
 npm run lint          # determinism lint: no Math.random / Date.now in pure modules
 npm run budget        # shell size, precache completeness, no external requests
 npm run visual        # pixel-diff the studio against committed baselines

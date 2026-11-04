@@ -957,6 +957,49 @@ try {
   check('resetting returns to the seed', reset.bars === planUi.bars && !reset.edited, `${reset.bars} bars`);
   check('and the plan is the seed\'s plan again', reset.matchesSeed);
 
+  console.log('\nDrum editor');
+  const drumEdit = await page.evaluate(async () => {
+    const { state } = await import('./src/state.js');
+    document.querySelector('details.plan').open = true;
+    // open the drum editor for the second section
+    const open = document.querySelectorAll('#plan-sections [data-act="drums"]')[1];
+    open.click();
+    await new Promise((r) => setTimeout(r, 300));
+    const editor = document.querySelector('#plan-sections .plan-sec[data-i="1"] .drum-editor');
+    const steps = editor ? editor.querySelectorAll('.drum-step').length : 0;
+    const rows = editor ? editor.querySelectorAll('.drum-row').length : 0;
+
+    // find a step that is off, in the kick row
+    const kickRow = editor.querySelector('.drum-row');
+    const off = [...kickRow.querySelectorAll('.drum-step')].find((b) => b.getAttribute('aria-pressed') === 'false');
+    const before = state.song.tracks.drums.length;
+    const bars = state.plan.sections[1].bars;
+    off.click();
+    await new Promise((r) => setTimeout(r, 400));
+    const after = state.song.tracks.drums.length;
+    const pressed = document.querySelector('#plan-sections .plan-sec[data-i="1"] .drum-row .drum-step[aria-pressed="true"]') !== null;
+    const lanes = state.plan.drums?.[1];
+    const wrote = !!(lanes && lanes.kick);
+    const label = document.querySelector('#plan-sections .plan-sec[data-i="1"] .drum-foot .device-note')?.textContent ?? '';
+
+    // and back to the generated pattern
+    document.querySelector('#plan-sections .plan-sec[data-i="1"] [data-act="drums-clear"]').click();
+    await new Promise((r) => setTimeout(r, 400));
+    return {
+      steps, rows, before, after, bars, pressed, wrote, label,
+      restored: state.song.tracks.drums.length,
+      clearedLanes: state.plan.drums?.[1] ?? null,
+      edited: !document.getElementById('plan-edited').hidden,
+    };
+  });
+  check('the drum editor opens for a section', drumEdit.rows === 5 && drumEdit.steps === 80, `${drumEdit.rows} rows, ${drumEdit.steps} steps`);
+  check('clicking a step adds a hit in every bar', drumEdit.after === drumEdit.before + drumEdit.bars, `${drumEdit.before} -> ${drumEdit.after} over ${drumEdit.bars} bars`);
+  check('the step lights up', drumEdit.pressed);
+  check('the lane is written into the plan', drumEdit.wrote);
+  check('and the panel says it is hand-written', /hand-written/i.test(drumEdit.label), drumEdit.label);
+  check('back to generated restores the pattern', drumEdit.restored === drumEdit.before, `${drumEdit.restored} vs ${drumEdit.before}`);
+  check('and forgets the lane', drumEdit.clearedLanes === null);
+
   console.log('\nAudio health');
   const hud = await page.evaluate(async () => {
     // make some noise first so the counters have something to count — but

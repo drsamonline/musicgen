@@ -1,6 +1,7 @@
 // Unit + snapshot tests. Run: node tests/unit/run.js
 import { compose, plan, render, normalisePlan, normalisePresets, BPM_MIN, BPM_MAX } from '../../app/src/core/composer.js';
-import { moveSection, duplicateSection, removeSection, setSectionBars, setChord, cycleChord, planSignature } from '../../app/src/core/plan-edit.js';
+import { moveSection, duplicateSection, removeSection, setSectionBars, setChord, cycleChord, planSignature,
+  drumGrid, toggleDrumStep, setDrumLane, clearDrumVoice, clearSectionDrums, drumsEdited, DRUM_VOICES } from '../../app/src/core/plan-edit.js';
 import { validateSong } from '../../app/src/core/validate.js';
 import { euclid, wolfram, lsystemGrid, buildMarkov, markovNext } from '../../app/src/core/algorithms.js';
 import { Rng, mulberry32, hashString } from '../../app/src/core/rng.js';
@@ -1064,6 +1065,117 @@ test('MIDI on any channel is accepted', () => {
   for (const ch of [0, 5, 9, 15]) {
     eq(midiMessageToAction([0x90 | ch, 64, 90]).type, 'noteon', `channel ${ch + 1}`);
   }
+});
+
+
+// ------------------------------------------------------------ drum lanes
+const drumPlan = () => plan(PLAN_PRESETS, 'drumseeda01');
+const drumSong = () => render(drumPlan());
+const verseIndex = (p) => p.sections.findIndex((s) => s.name === 'verse');
+
+test('the drum grid reads the pattern that is playing', () => {
+  const song = drumSong();
+  const p = drumPlan();
+  const grid = drumGrid(song, verseIndex(p));
+  eq(Object.keys(grid).join(','), DRUM_VOICES.join(','), 'a lane per voice');
+  eq(grid.kick.length, song.beatsPerBar * 4, 'sixteenths in a bar');
+  const total = DRUM_VOICES.reduce((a, v) => a + grid[v].filter(Boolean).length, 0);
+  assert(total > 0, 'the generated pattern is not empty');
+});
+
+test('an unedited plan still renders exactly as before', () => {
+  const p = drumPlan();
+  eq(p.drums, null, 'no lanes until someone writes one');
+  eq(JSON.stringify(render(p)), JSON.stringify(compose(PLAN_PRESETS, 'drumseeda01')), 'byte-identical');
+});
+
+test('toggling a step captures the whole lane first', () => {
+  const p = drumPlan();
+  const song = render(p);
+  const vi = verseIndex(p);
+  const before = drumGrid(song, vi).kick;
+  const off = before.indexOf(0);
+  assert(off >= 0, 'there is a silent sixteenth to turn on');
+
+  const edited = toggleDrumStep(p, vi, 'kick', off, song);
+  const lane = edited.drums[vi].kick;
+  eq(lane.length, before.length);
+  eq(lane[off], 1, 'the clicked step is on');
+  for (let i = 0; i < before.length; i++) {
+    if (i !== off) eq(lane[i], before[i], `step ${i} is untouched`);
+  }
+  const after = render(edited);
+  assert(after.tracks.drums.length > song.tracks.drums.length, 'and it is audible');
+});
+
+test('toggling the same step twice restores the original', () => {
+  const p = drumPlan();
+  const song = render(p);
+  const vi = verseIndex(p);
+  const off = drumGrid(song, vi).kick.indexOf(0);
+  const on = toggleDrumStep(p, vi, 'kick', off, song);
+  const offAgain = toggleDrumStep(on, vi, 'kick', off, render(on));
+  eq(drumGrid(render(offAgain), vi).kick.join(''), drumGrid(song, vi).kick.join(''));
+});
+
+test('a lane touches only its own voice', () => {
+  const p = drumPlan();
+  const song = render(p);
+  const vi = verseIndex(p);
+  const before = drumGrid(song, vi);
+  const edited = toggleDrumStep(p, vi, 'hat', before.hat.indexOf(0), song);
+  const after = drumGrid(render(edited), vi);
+  eq(after.snare.join(''), before.snare.join(''), 'snare untouched');
+  eq(after.kick.join(''), before.kick.join(''), 'kick untouched');
+  assert(after.hat.join('') !== before.hat.join(''), 'hat changed');
+});
+
+test('clearing a lane gives the section back to the generator', () => {
+  const p = drumPlan();
+  const song = render(p);
+  const vi = verseIndex(p);
+  const edited = setDrumLane(p, vi, 'kick', new Array(16).fill(1));
+  assert(render(edited).tracks.drums.length !== song.tracks.drums.length, 'the lane is heard');
+  const back = clearDrumVoice(edited, vi, 'kick');
+  eq(JSON.stringify(render(back)), JSON.stringify(song), 'exactly the generated song again');
+  eq(drumsEdited(back), false);
+});
+
+test('a written lane repeats in every bar of its section', () => {
+  const p = drumPlan();
+  const vi = verseIndex(p);
+  const bars = p.sections[vi].bars;
+  const base = render(p).tracks.drums.length;
+  const edited = setDrumLane(p, vi, 'tom', [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const added = render(edited).tracks.drums.length - base;
+  // one extra tom per bar, minus whatever toms the generator had on that step
+  assert(added > 0 && added <= bars, `${added} extra hits over ${bars} bars`);
+});
+
+test('a malformed lane is refused, not rendered', () => {
+  const p = drumPlan();
+  const broken = { ...p, drums: { 0: { kick: 'not-an-array' }, 1: { hat: [1, 1] } } };
+  const q = normalisePlan(broken);
+  eq(q.drums[0], undefined, 'the bad voice is dropped');
+  eq(q.drums[1].hat.length, q.beatsPerBar * 4, 'a short lane is padded to the bar');
+  eq(q.drums[1].hat[2], 0, 'and padded with silence');
+});
+
+test('an edited drum plan survives JSON and stays deterministic', () => {
+  const p = setDrumLane(drumPlan(), 1, 'hat', new Array(16).fill(1).map((_, i) => (i % 2)));
+  const a = render(p);
+  const b = render(JSON.parse(JSON.stringify(p)));
+  eq(JSON.stringify(a), JSON.stringify(b));
+  assert(validateSong(a).ok !== false, 'and still validates');
+});
+
+test('editing drums never mutates the plan it was given', () => {
+  const p = drumPlan();
+  const frozen = JSON.stringify(p);
+  toggleDrumStep(p, 1, 'kick', 0, render(p));
+  setDrumLane(p, 1, 'hat', new Array(16).fill(1));
+  clearSectionDrums(p, 1);
+  eq(JSON.stringify(p), frozen);
 });
 
 console.log(`\n${pass} passed, ${failures.length} failed\n`);

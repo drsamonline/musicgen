@@ -140,6 +140,16 @@ await auditPage('studio health (light)', {
   url: `${base}app/`, theme: 'light',
   prepare: (page) => page.evaluate(() => document.getElementById('health-dialog').showModal()),
 });
+// The drum editor at phone width is the case that matters: sixteen targets
+// across 430 px is exactly where the 24 px minimum fails.
+await auditPage('studio drum editor (mobile)', {
+  url: `${base}app/`, theme: 'dark', width: 430, height: 932,
+  prepare: (page) => page.evaluate(async () => {
+    document.querySelector('details.plan').open = true;
+    document.querySelectorAll('#plan-sections [data-act="drums"]')[1]?.click();
+    await new Promise((r) => setTimeout(r, 300));
+  }),
+});
 await auditPage('studio plan open (light)', {
   url: `${base}app/`, theme: 'light',
   prepare: (page) => page.evaluate(() => { document.querySelector('details.plan').open = true; }),

@@ -657,6 +657,10 @@ export const PLAN_VERSION = 1;
 
 const KEY_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
+// Velocities for a hand-written drum lane. A step sequencer has no velocity
+// column, so each voice gets the level it would have had from the generator.
+const DRUM_VELOCITY = { kick: 0.9, snare: 0.8, hat: 0.45, clap: 0.6, tom: 0.7, rim: 0.5, shaker: 0.35 };
+
 export function plan(rawPresets, seed) {
   const presets = normalisePresets(rawPresets);
   const style = { ...STYLES[presets.style], ...(STYLE_EXTRAS[presets.style] || {}) };
@@ -755,6 +759,9 @@ export function plan(rawPresets, seed) {
     theme: songTheme,
     sections,
     aliases,
+    // no hand-written drum lanes until someone writes one; the field exists so
+    // a reader of the plan can see that, rather than guessing at an absent key
+    drums: null,
     variant: presets.variant ?? rng.fork('variant').int(3),
   };
 }
@@ -812,9 +819,29 @@ export function normalisePlan(raw) {
     return sec;
   });
 
+  // Drum lanes: only voices that were actually written, only as long as a bar,
+  // only 0 or 1. A malformed lane is dropped rather than rendered.
+  const laneLen = beatsPerBar * 4;
+  let drums = null;
+  if (p.drums && typeof p.drums === 'object') {
+    drums = {};
+    for (const [si, lanes] of Object.entries(p.drums)) {
+      const index = Number(si);
+      if (!Number.isInteger(index) || !lanes || typeof lanes !== 'object') continue;
+      const clean = {};
+      for (const [voice, lane] of Object.entries(lanes)) {
+        if (!Array.isArray(lane)) continue;
+        clean[voice] = Array.from({ length: laneLen }, (_, i) => (lane[i] ? 1 : 0));
+      }
+      if (Object.keys(clean).length) drums[index] = clean;
+    }
+    if (!Object.keys(drums).length) drums = null;
+  }
+
   return {
     ...p,
     presets,
+    drums,
     beatsPerBar,
     bars: bar,
     totalBeats: bar * beatsPerBar,
@@ -927,9 +954,31 @@ export function render(rawPlan) {
       // decided inside the drum stream so a locked pattern stays locked
       ctx.polyrhythm = (style.polyrhythm ?? 0) > 0 && rngD.chance(style.polyrhythm);
       const steps = beatsPerBar * 4;
+      // A hand-written lane replaces the generated one for that voice only.
+      // The generator still runs — its draws are part of every other voice's
+      // determinism — and the overridden voice is filtered out afterwards.
+      const lanes = planObj.drums?.[si] || null;
       for (let bar = 0; bar < sec.bars; bar++) {
         const dctx = { ...ctx, barStart: (barCursor + bar) * beatsPerBar, mood };
-        tracks.drums.push(...drumBar(rngD, style, intensity, bar, bar, sec.bars, steps, dctx));
+        let barNotes = drumBar(rngD, style, intensity, bar, bar, sec.bars, steps, dctx);
+        if (lanes) barNotes = barNotes.filter((n) => !lanes[n.drum]);
+        tracks.drums.push(...barNotes);
+      }
+      if (lanes) {
+        for (let bar = 0; bar < sec.bars; bar++) {
+          const start = (barCursor + bar) * beatsPerBar;
+          for (const [voice, lane] of Object.entries(lanes)) {
+            for (let i = 0; i < lane.length; i++) {
+              if (!lane[i]) continue;
+              tracks.drums.push({
+                t: start + i * 0.25,
+                d: 0.22,
+                v: DRUM_VELOCITY[voice] ?? 0.7,
+                drum: voice,
+              });
+            }
+          }
+        }
       }
     }
     if (allowed.includes('lead')) {
