@@ -992,3 +992,44 @@ a:focus-visible,
 /* --dim is 3.94:1 on a dialog's panel colour, which is under AA for small text.
    Inside the controllers dialog, labels use the next step up. */
 #controllers-dialog .row label { color: var(--muted); }
+
+/* --------------------------------------------------------- drum editor
+   Five voices of sixteen steps, inside the section they belong to. */
+.drum-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline, var(--line));
+}
+.drum-row { display: flex; align-items: center; gap: 8px; }
+.drum-name {
+  width: 42px;
+  flex: none;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.drum-steps { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; flex: 1; min-width: 0; }
+.drum-step {
+  height: 20px;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+}
+.drum-step:hover { border-color: var(--line-strong); }
+.drum-step[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); }
+.drum-step:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.drum-foot { display: flex; align-items: center; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
+
+/* Sixteen targets across a phone is under the 24 px minimum, so they scroll
+   rather than shrink. */
+@media (max-width: 560px) {
+  .drum-steps { grid-template-columns: repeat(16, 24px); overflow-x: auto; padding-bottom: 4px; }
+  .drum-step { height: 24px; }
+}

@@ -9,6 +9,7 @@ import { state } from '../state.js';
 import { plan, render, normalisePlan } from '../core/composer.js';
 import {
   moveSection, duplicateSection, removeSection, setSectionBars, cycleChord, planSignature,
+  toggleDrumStep, clearSectionDrums, drumGrid, DRUM_VOICES,
 } from '../core/plan-edit.js';
 import { els, app, toast, fail } from './ctx.js';
 import { generate } from './generate.js';
@@ -37,6 +38,10 @@ export function isEdited() {
     return false;
   }
 }
+
+// Which section's drum editor is open. One at a time: five voices of sixteen
+// steps is eighty controls, and eight of those at once is a wall.
+let openDrums = null;
 
 function apply(next, message) {
   state.plan = normalisePlan(next);
@@ -111,6 +116,7 @@ export function renderPlanPanel() {
       el('button', { class: 'ghost tiny', 'data-act': 'down', 'data-i': i, 'aria-label': `Move ${NAMES[sec.name] ?? sec.name} later`, title: 'Move later', text: '↓' }),
       el('button', { class: 'ghost tiny', 'data-act': 'bars-', 'data-i': i, 'aria-label': `Shorten ${NAMES[sec.name] ?? sec.name}`, title: 'Fewer bars', text: '−' }),
       el('button', { class: 'ghost tiny', 'data-act': 'bars+', 'data-i': i, 'aria-label': `Lengthen ${NAMES[sec.name] ?? sec.name}`, title: 'More bars', text: '+' }),
+      el('button', { class: 'ghost tiny', 'data-act': 'drums', 'data-i': i, 'aria-label': `Edit the drum pattern of ${NAMES[sec.name] ?? sec.name}`, 'aria-expanded': openDrums === i ? 'true' : 'false', title: 'Drum pattern', text: '▦' }),
       el('button', { class: 'ghost tiny', 'data-act': 'dup', 'data-i': i, 'aria-label': `Repeat ${NAMES[sec.name] ?? sec.name}`, title: 'Repeat this section', text: '⧉' }),
       el('button', { class: 'ghost tiny', 'data-act': 'del', 'data-i': i, 'aria-label': `Remove ${NAMES[sec.name] ?? sec.name}`, title: 'Remove this section', text: '×' }),
     ]);
@@ -133,8 +139,59 @@ export function renderPlanPanel() {
       chords.append(chip);
     });
 
-    host.append(el('li', { class: 'plan-sec', 'data-i': i }, [head, tools, chords]));
+    const kids = [head, tools, chords];
+    if (openDrums === i) kids.push(drumEditor(i, p));
+    host.append(el('li', { class: 'plan-sec', 'data-i': i }, kids));
   });
+}
+
+// Five voices of sixteen steps, read from the song that is playing. A lit step
+// is a hit; the first click on a section captures the whole lane so the rest of
+// the pattern does not move under the user's hand.
+function drumEditor(sectionIndex, plan) {
+  const grid = drumGrid(state.song, sectionIndex);
+  const wrap = el('div', { class: 'drum-editor' });
+
+  if (!grid) {
+    wrap.append(el('p', { class: 'device-note', text: 'No drums in this section.' }));
+    return wrap;
+  }
+
+  for (const voice of DRUM_VOICES) {
+    const row = el('div', { class: 'drum-row' }, [
+      el('span', { class: 'drum-name', text: voice }),
+    ]);
+    const steps = el('div', { class: 'drum-steps', role: 'group', 'aria-label': `${voice} pattern` });
+    grid[voice].forEach((on, step) => {
+      const written = plan.drums?.[sectionIndex]?.[voice];
+      steps.append(el('button', {
+        class: 'drum-step',
+        type: 'button',
+        'data-act': 'drum',
+        'data-i': String(sectionIndex),
+        'data-v': voice,
+        'data-s': String(step),
+        'aria-pressed': on ? 'true' : 'false',
+        'aria-label': `${voice} step ${step + 1}${on ? ', on' : ', off'}${written ? '' : ' (generated)'}`,
+        title: `${voice} · step ${step + 1}`,
+      }));
+    });
+    row.append(steps);
+    wrap.append(row);
+  }
+
+  const foot = el('div', { class: 'drum-foot' }, [
+    el('button', {
+      class: 'ghost small', type: 'button', 'data-act': 'drums-clear', 'data-i': String(sectionIndex),
+      text: 'Back to generated',
+    }),
+    el('span', {
+      class: 'device-note',
+      text: plan.drums?.[sectionIndex] ? 'Hand-written — the seed no longer decides this section\'s drums.' : 'Generated from the seed. Click a step to take over.',
+    }),
+  ]);
+  wrap.append(foot);
+  return wrap;
 }
 
 // --------------------------------------------------------------- events
@@ -156,6 +213,21 @@ export function wirePlan() {
         case 'dup': apply(duplicateSection(p, i), 'Section repeated'); break;
         case 'del': apply(removeSection(p, i), 'Section removed'); break;
         case 'chord': apply(cycleChord(p, i, Number(btn.dataset.c), 1)); break;
+        case 'drums':
+          openDrums = openDrums === i ? null : i;
+          renderPlanPanel();
+          break;
+        case 'drum': {
+          const next = toggleDrumStep(p, i, btn.dataset.v, Number(btn.dataset.s), state.song);
+          state.plan = next;
+          state.planSource = sourceOf();
+          generate({ keepPosition: true, announce: false });
+          renderPlanPanel();
+          break;
+        }
+        case 'drums-clear':
+          apply(clearSectionDrums(p, i), 'Drums back to the seed');
+          break;
         default: break;
       }
     } catch (err) {

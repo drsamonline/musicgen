@@ -192,3 +192,84 @@ export function planSignature(plan) {
     .map((s) => `${s.name}:${s.bars}:${s.chords.map((c) => `${c.rootPc}${c.quality}`).join(',')}`)
     .join('|');
 }
+
+// ------------------------------------------------------------- drum lanes
+// A step sequencer for one section. The grid you see is read from the song you
+// can hear, not from the plan — the plan only stores what was *changed*, so an
+// untouched section still shows the pattern the generator wrote.
+export const DRUM_VOICES = ['kick', 'snare', 'hat', 'clap', 'tom'];
+
+export function drumGrid(song, sectionIndex) {
+  const sec = song?.sections?.[sectionIndex];
+  if (!sec) return null;
+  const steps = song.beatsPerBar * 4;
+  const lanes = {};
+  for (const voice of DRUM_VOICES) lanes[voice] = new Array(steps).fill(0);
+
+  const start = sec.bar * song.beatsPerBar;
+  const end = start + sec.bars * song.beatsPerBar;
+  for (const n of song.tracks?.drums || []) {
+    if (n.t < start - 1e-6 || n.t >= end - 1e-6) continue;
+    const lane = lanes[n.drum];
+    if (!lane) continue;
+    // the pattern repeats every bar, so a hit in any bar sets that step
+    const inBar = (n.t - start) % song.beatsPerBar;
+    lane[Math.round(inBar * 4) % steps] = 1;
+  }
+  return lanes;
+}
+
+// Toggle one sixteenth of one voice. The first edit to a section captures the
+// whole lane for that voice, so the rest of the pattern does not change under
+// the user's hand.
+export function toggleDrumStep(plan, sectionIndex, voice, step, song = null) {
+  const p = normalisePlan(clone(plan));
+  if (!p.sections[sectionIndex]) throw new Error('toggleDrumStep: no such section');
+  const len = p.beatsPerBar * 4;
+  const existing = p.drums?.[sectionIndex]?.[voice];
+  const lane = existing
+    ? existing.slice()
+    : (song && drumGrid(song, sectionIndex)?.[voice]?.slice()) || new Array(len).fill(0);
+  const i = ((Math.round(step) % len) + len) % len;
+  lane[i] = lane[i] ? 0 : 1;
+  return withLane(p, sectionIndex, voice, lane);
+}
+
+// Set a whole lane at once (used by "clear" and by tests).
+export function setDrumLane(plan, sectionIndex, voice, lane) {
+  const p = normalisePlan(clone(plan));
+  if (!p.sections[sectionIndex]) throw new Error('setDrumLane: no such section');
+  return withLane(p, sectionIndex, voice, Array.from(lane, (v) => (v ? 1 : 0)));
+}
+
+// Drop the hand-written lane and go back to the generated one.
+export function clearDrumVoice(plan, sectionIndex, voice) {
+  const p = normalisePlan(clone(plan));
+  const lanes = { ...(p.drums?.[sectionIndex] || {}) };
+  delete lanes[voice];
+  return withLanes(p, sectionIndex, lanes);
+}
+
+export function clearSectionDrums(plan, sectionIndex) {
+  const p = normalisePlan(clone(plan));
+  return withLanes(p, sectionIndex, {});
+}
+
+function withLane(plan, sectionIndex, voice, lane) {
+  const lanes = { ...(plan.drums?.[sectionIndex] || {}), [voice]: lane };
+  return withLanes(plan, sectionIndex, lanes);
+}
+
+function withLanes(plan, sectionIndex, lanes) {
+  const drums = { ...(plan.drums || {}) };
+  if (Object.keys(lanes).length) drums[sectionIndex] = lanes;
+  else delete drums[sectionIndex];
+  return {
+    ...plan,
+    drums: Object.keys(drums).length ? drums : null,
+  };
+}
+
+export function drumsEdited(plan) {
+  return !!(plan?.drums && Object.keys(plan.drums).length);
+}
