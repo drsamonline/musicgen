@@ -6,6 +6,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildSite, SITE } from './build-site.mjs';
 
 async function loadPuppeteer() {
   try { const m = await import('puppeteer'); return m.default ?? m; } catch { /* fall through */ }
@@ -14,6 +15,7 @@ async function loadPuppeteer() {
 }
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+buildSite({ quiet: true });
 const BASE = path.join(ROOT, 'tests', 'visual');
 const UPDATE = process.argv.includes('--update');
 fs.mkdirSync(BASE, { recursive: true });
@@ -21,7 +23,7 @@ fs.mkdirSync(BASE, { recursive: true });
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  let file = path.join(ROOT, decodeURIComponent(url.pathname));
+  let file = path.join(SITE, decodeURIComponent(url.pathname));
   if (url.pathname.endsWith('/')) file = path.join(file, 'index.html');
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404).end('not found'); return; }

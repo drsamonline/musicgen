@@ -10,8 +10,15 @@
     "type": "git",
     "url": "https://github.com/drsamonline/musicgen.git"
   },
-  "keywords": ["generative-music", "web-audio", "pwa", "synthesis", "offline-first"],
+  "keywords": [
+    "generative-music",
+    "web-audio",
+    "pwa",
+    "synthesis",
+    "offline-first"
+  ],
   "scripts": {
+    "build": "node scripts/build-site.mjs",
     "start": "python3 -m http.server 8080 --directory app",
     "test": "node tests/unit/run.js",
     "test:unit": "node tests/unit/run.js",
