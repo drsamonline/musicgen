@@ -951,7 +951,10 @@ try {
       recoveries: app.player.health.recoveries,
       hasGraph: !!app.player.graph?.master,
       hasSchedule: typeof app.player.schedule === 'function',
-      hudVerdict: document.getElementById('health-verdict').textContent,
+      // read the Context row, not the verdict: under load the verdict is
+      // legitimately a warning ("1 dropped"), and the thing being asserted is
+      // that the panel is showing the new context at all
+      hudBody: document.getElementById('health-body').textContent,
     };
   });
   check('rebuilding swaps the audio context', rebuilt.newContext);
@@ -962,7 +965,7 @@ try {
   check('and it did not jump back to the start',
     rebuilt.position >= Math.max(0, rebuilt.positionBefore - 1.5),
     `${rebuilt.positionBefore.toFixed(2)} -> ${rebuilt.position.toFixed(2)}`);
-  check('the panel reflects the new context', /running|kHz|tick/i.test(rebuilt.hudVerdict), rebuilt.hudVerdict);
+  check('the panel reflects the new context', /running/.test(rebuilt.hudBody), rebuilt.hudBody.slice(0, 60));
 
   // The automatic path: a context that reports "running" while its clock has
   // stopped. Nothing in `state` reveals this, which is why it went unnoticed
