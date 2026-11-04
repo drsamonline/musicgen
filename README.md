@@ -7,7 +7,7 @@
 [![license: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-c6f24e.svg)](LICENSE)
 [![dependencies: 0](https://img.shields.io/badge/dependencies-0-9aa8ff.svg)](#)
 [![tempo: 20–500 BPM](https://img.shields.io/badge/tempo-20--500%20BPM-9aa8ff.svg)](#)
-[![size: 98 KB gzipped](https://img.shields.io/badge/size-98%20KB%20gzipped-9aa8ff.svg)](#)
+[![size: 102 KB gzipped](https://img.shields.io/badge/size-102%20KB%20gzipped-9aa8ff.svg)](#)
 [![PWA: offline-first](https://img.shields.io/badge/PWA-offline--first-c6f24e.svg)](#)
 [![web audio api](https://img.shields.io/badge/web%20audio-api-ff9f6b.svg)](#)
 
@@ -63,7 +63,9 @@ Then use your browser's **Install** / **Add to Home Screen** (iOS: Share → Add
 
 **MIDI both ways** — export the song as Type-1 MIDI, or **import a MIDI file as the theme**: the highest-register line becomes the song's idea and everything derives from it.
 
-**The exports** — WAV (16/24/32-bit, normalised to a chosen loudness target under a −1 dBTP ceiling), per-track stems as a zip with per-stem loudness in the readme, Type-1 MIDI, full song JSON (export *and* import), 1024 px cover art, and seed links that reproduce the exact song elsewhere.
+**The exports** — WAV (16/24/32-bit, normalised to a chosen loudness target under a −1 dBTP ceiling), per-track stems as a zip with per-stem loudness in the readme, Type-1 MIDI, **XM module**, full song JSON (export *and* import), 1024 px cover art, and seed links that reproduce the exact song elsewhere.
+
+**The module file** — a WAV keeps the sound and loses the editability; a MIDI keeps the notes and loses the timbre. An `.XM` keeps both in about 26 KB: it opens in OpenMPT, VLC or any tracker, and it carries its own instruments. MusicGen has no samples, so they are generated — one 32-sample single cycle per pitched track, built from the harmonic series of the song's synthesis technology, and one short percussive hit per drum voice. Polyphony needs channels, so the writer allocates pools rather than one channel per track: a four-note chord voicing on a single tracker channel would lose three notes of every four. The format is written from its specification, not from any tracker's source, since the trackers are GPL-family and this app is not.
 
 **The platform bits** — installable PWA with a real install prompt and an offline badge, MediaSession metadata with generated artwork, screen Wake Lock, five views (piano roll, tracker grid, spectrum, waveform, generative art), a piano roll you can zoom, pan and scrub, section looping, A/B against the previous song, undo/redo, a library with search/rename/duplicate, session restore, a text song summary for screen readers, `prefers-reduced-motion` and `prefers-color-scheme` support, and a strict CSP (`default-src 'self'`) with zero runtime fetches.
 
@@ -89,8 +91,8 @@ npm run audit
 ## Tests
 
 ```bash
-npm test              # 76 unit tests, no browser needed
-npm run test:browser  # 157 tests in real Chromium with real Web Audio
+npm test              # 85 unit tests, no browser needed
+npm run test:browser  # 163 tests in real Chromium with real Web Audio
 npm run lint          # determinism lint: no Math.random / Date.now in pure modules
 npm run budget        # shell size, precache completeness, no external requests
 npm run visual        # pixel-diff the studio against committed baselines
