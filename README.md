@@ -7,7 +7,7 @@
 [![license: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-c6f24e.svg)](LICENSE)
 [![dependencies: 0](https://img.shields.io/badge/dependencies-0-9aa8ff.svg)](#)
 [![tempo: 20–500 BPM](https://img.shields.io/badge/tempo-20--500%20BPM-9aa8ff.svg)](#)
-[![size: 95 KB gzipped](https://img.shields.io/badge/size-95%20KB%20gzipped-9aa8ff.svg)](#)
+[![size: 98 KB gzipped](https://img.shields.io/badge/size-98%20KB%20gzipped-9aa8ff.svg)](#)
 [![PWA: offline-first](https://img.shields.io/badge/PWA-offline--first-c6f24e.svg)](#)
 [![web audio api](https://img.shields.io/badge/web%20audio-api-ff9f6b.svg)](#)
 
@@ -65,7 +65,13 @@ Then use your browser's **Install** / **Add to Home Screen** (iOS: Share → Add
 
 **The exports** — WAV (16/24/32-bit, normalised to a chosen loudness target under a −1 dBTP ceiling), per-track stems as a zip with per-stem loudness in the readme, Type-1 MIDI, full song JSON (export *and* import), 1024 px cover art, and seed links that reproduce the exact song elsewhere.
 
-**The platform bits** — installable PWA with a real install prompt and an offline badge, MediaSession metadata with generated artwork, screen Wake Lock, four visualisers, a piano roll you can zoom, pan and scrub, section looping, A/B against the previous song, undo/redo, a library with search/rename/duplicate, session restore, a text song summary for screen readers, `prefers-reduced-motion` and `prefers-color-scheme` support, and a strict CSP (`default-src 'self'`) with zero runtime fetches.
+**The platform bits** — installable PWA with a real install prompt and an offline badge, MediaSession metadata with generated artwork, screen Wake Lock, five views (piano roll, tracker grid, spectrum, waveform, generative art), a piano roll you can zoom, pan and scrub, section looping, A/B against the previous song, undo/redo, a library with search/rename/duplicate, session restore, a text song summary for screen readers, `prefers-reduced-motion` and `prefers-color-scheme` support, and a strict CSP (`default-src 'self'`) with zero runtime fetches.
+
+## The grid
+
+The visualiser cycles **roll → grid → bars → wave → art**. The grid is not a piano roll with different paint: it is a tracker's reading of the same song — one row per sixteenth, one column per track, notes written the way a tracker writes them (`C-4`, `F#2`) and drums written as voices (`kck`, `snr`, `hat`), with a stacked step marked `kck+` rather than quietly dropping the second hit. A roll answers *what is the melody doing*; this answers *what lands on the sixteenth*, which is the question drums ask.
+
+The layout is computed by pure functions (`noteLabel`, `buildStepIndex`, `rowsFor`, `windowFor`) so it is tested without a canvas; `drawTracker` only paints what they return. The step index is built once per song — scanning 1,500 notes for every row of every frame would be the entire cost of the view.
 
 ## Themes
 
@@ -83,8 +89,8 @@ npm run audit
 ## Tests
 
 ```bash
-npm test              # 70 unit tests, no browser needed
-npm run test:browser  # 151 tests in real Chromium with real Web Audio
+npm test              # 76 unit tests, no browser needed
+npm run test:browser  # 157 tests in real Chromium with real Web Audio
 npm run lint          # determinism lint: no Math.random / Date.now in pure modules
 npm run budget        # shell size, precache completeness, no external requests
 npm run visual        # pixel-diff the studio against committed baselines
@@ -179,7 +185,7 @@ Two splits, both done for editability rather than tidiness.
 
 **The engine** is five modules behind a barrel (`engine.js`): `worklets.js` (AudioWorklet loading and fallbacks), `graph.js` (track chains, buses, master chain), `scheduler.js` (tempo map, events, automation, voice dispatch), `player.js` (live transport) and `render.js` (offline rendering).
 
-**The UI** is six modules behind `main.js` (205 lines of wiring and nothing else): `ui/ctx.js` (the DOM map, the mutable singletons, the small helpers), `ui/dials.js` (presets, random/evolve/mutate, groove editor), `ui/generate.js` (history, compose, the three readouts), `ui/transport.js` (player lifecycle, loop, A/B, wake lock, MediaSession, install), `ui/visuals.js` (theme, four visualisers, piano-roll gestures) and `ui/exporters.js` (WAV, stems, MIDI, JSON, art, share, library, recording).
+**The UI** is six modules behind `main.js` (205 lines of wiring and nothing else): `ui/ctx.js` (the DOM map, the mutable singletons, the small helpers), `ui/dials.js` (presets, random/evolve/mutate, groove editor), `ui/generate.js` (history, compose, the three readouts), `ui/transport.js` (player lifecycle, loop, A/B, wake lock, MediaSession, install), `ui/visuals.js` (theme, five views, piano-roll gestures) and `ui/exporters.js` (WAV, stems, MIDI, JSON, art, share, library, recording).
 
 ## Contributing
 
