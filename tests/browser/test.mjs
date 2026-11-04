@@ -1062,6 +1062,62 @@ try {
 
   await page.evaluate(() => { document.getElementById('health-dialog').close(); });
 
+  console.log('\nControllers');
+  const pad = await page.evaluate(async () => {
+    const app = globalThis.__musicgen.app;
+    if (app.player?.playing) { document.getElementById('play').click(); await new Promise((r) => setTimeout(r, 300)); }
+    const started = !!app.player?.playing;
+
+    // a gamepad the page can actually see, wired before the dialog opens
+    const fake = {
+      index: 0, id: 'Fake Pad (STANDARD GAMEPAD)', connected: true, mapping: 'standard', axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 16 }, () => ({ pressed: false, value: 0 })),
+    };
+    navigator.getGamepads = () => [fake];
+
+    document.querySelector('#menu').click();
+    document.querySelector('#menu-sheet [data-act="controllers"]').click();
+    await new Promise((r) => setTimeout(r, 300));
+    const open = document.getElementById('controllers-dialog').open;
+    const mapped = document.querySelectorAll('#pad-map dt').length;
+    const midiNote = document.getElementById('midi-list').textContent;
+
+    // press A: play. Hold it: nothing more should happen. Release, press: pause.
+    fake.buttons[0].pressed = true;
+    await new Promise((r) => setTimeout(r, 600));
+    const afterPress = !!app.player?.playing;
+    fake.buttons[0].pressed = false;
+    await new Promise((r) => setTimeout(r, 200));
+    const afterHold = !!app.player?.playing;
+    fake.buttons[0].pressed = true;
+    await new Promise((r) => setTimeout(r, 600));
+    const afterSecond = !!app.player?.playing;
+    fake.buttons[0].pressed = false;
+
+    // close the dialog: the poll must stop
+    document.getElementById('controllers-dialog').close();
+    await new Promise((r) => setTimeout(r, 200));
+    const beforeClosedPress = !!app.player?.playing;
+    fake.buttons[0].pressed = true;
+    await new Promise((r) => setTimeout(r, 500));
+    const afterClosedPress = !!app.player?.playing;
+    fake.buttons[0].pressed = false;
+
+    return {
+      started, open, mapped, midiNote,
+      afterPress, afterHold, afterSecond,
+      beforeClosedPress, afterClosedPress,
+      padStatus: document.getElementById('pad-status').textContent,
+    };
+  });
+  check('the controllers dialog opens', pad.open);
+  check('it lists the button map', pad.mapped === 10, `${pad.mapped} buttons`);
+  check('and says MIDI is not connected yet', /not connected/i.test(pad.midiNote), pad.midiNote);
+  check('a gamepad button plays', pad.afterPress && !pad.started, `playing: ${pad.afterPress}`);
+  check('holding it does not fire again', pad.afterHold === pad.afterPress);
+  check('a second press pauses', pad.afterSecond === false, `playing: ${pad.afterSecond}`);
+  check('the poll stops when the dialog closes', pad.afterClosedPress === pad.beforeClosedPress);
+
   await page.screenshot({ path: path.join(ROOT, 'tests', 'browser', 'screenshot.png'), fullPage: true });
 } finally {
   await browser.close();

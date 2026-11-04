@@ -27,6 +27,8 @@ export const els = {
   planReset: $('plan-reset'), planCopy: $('plan-copy'),
   healthDialog: $('health-dialog'), healthBody: $('health-body'), healthVerdict: $('health-verdict'),
   healthRebuild: $('health-rebuild'), healthReset: $('health-reset'),
+  controllersDialog: $('controllers-dialog'), midiConnect: $('midi-connect'),
+  midiList: $('midi-list'), padStatus: $('pad-status'), padMap: $('pad-map'),
 };
 
 // Everything that changes at runtime lives here, so modules can share it
