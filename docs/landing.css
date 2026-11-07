@@ -502,3 +502,32 @@ h3 {
   * { animation: none !important; transition: none !important; }
   html { scroll-behavior: auto; }
 }
+
+/* ---- light theme ---------------------------------------------------------
+   Counterparts of :root: the ground goes to warm paper, the text to near-black, and the
+   two accents darken until they hold on it. The body's wash is a literal gradient and is
+   re-declared for the light ground. */
+:root[data-theme="light"] {
+  --ink: #f4f6f0;
+  --ink-2: #eceee7;
+  --paper: #0b0d14;
+  --muted: #5a6260;
+  --line: rgba(11, 13, 20, 0.12);
+  --lime: #4d7c0f;
+  --violet: #4c5bd4;
+}
+:root[data-theme="light"] body {
+  background:
+    radial-gradient(900px 520px at 82% -10%, rgba(76, 91, 212, 0.10), transparent 62%),
+    var(--ink);
+}
+
+  /* ICON ONLY, inside the header. A text chip needs ~70px and these rows are full. */
+  .theme-btn{
+    display:inline-flex;align-items:center;justify-content:center;flex:none;
+    width:30px;height:30px;margin-left:10px;padding:0;background:transparent;color:inherit;
+    border:1px solid var(--line);border-radius:50%;cursor:pointer;opacity:.8;
+  }
+  .theme-btn:hover{opacity:1}
+  .theme-btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round}
+  .theme-btn-top{float:right;margin:2px 0 0 10px}
