@@ -1,19 +1,14 @@
 {
-  "_note": "Pages are set by hand, from the 2026-11-05 audit. A sweep must not restore anything listed in `deleted`, must not create a landing page where `landing` already points, and must not overwrite `landing` or `app`.",
+  "_note": "Pages are set by hand, from the 2026-11-05 audit. A sweep must not restore anything listed in `deleted`, must not create a landing page where `landing` already points, and must not overwrite `landing` or `app`. 2026-11-07: `app` pointed at docs/play/index.html, which is a REDIRECT STUB, not the studio - the studio is app/ at the root and pages.yml assembles docs/ + app/ into _site/ at publish time, so it is served at /app/. The same stub's tombstone was also still in `deleted` although the file exists.",
   "manual": true,
   "landing": "docs/index.html",
-  "app": "docs/play/index.html",
+  "app": "app/index.html",
   "deleted": [
     {
       "path": "index.html",
       "pid": "p149",
       "commit": "aa831948"
-    },
-    {
-      "path": "docs/play/index.html",
-      "pid": "p148",
-      "commit": "3792bd71"
     }
   ],
-  "updated": "2026-11-06"
+  "updated": "2026-11-07"
 }
