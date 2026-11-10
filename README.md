@@ -225,6 +225,21 @@ Three decisions are worth knowing about, because they were made against the obvi
 
 Stems share one gain (measured on the mix) rather than being re-mixed per track — the per-stem loudness is written into the zip's readme; undo covers preset changes, not generations; note audition and a groove editor are not implemented; granular and physical modelling remain native-node approximations rather than AudioWorklets; MIDI import, microtuning, a share target and a protocol handler are still open. The full backlog, with what is done and what is not, is in [docs/ENHANCEMENTS.md](docs/ENHANCEMENTS.md).
 
+<!-- support:sweep -->
+## Support
+
+One person's work: no company, no ads, no tracking, no paid tier. If it saved you an
+afternoon, a contribution keeps the next one coming — any amount, or none.
+
+| | |
+|---|---|
+| **UPI** | `drsohilboi@ybl` |
+| **Ko-fi** | [ko-fi.com/matneo](https://ko-fi.com/matneo) |
+| **PayPal** | [paypal.me/drsohilmomin](https://paypal.me/drsohilmomin?locale.x=en_GB&country.x=IN) |
+| **Books** | [the author's other work](https://www.amazon.com/stores/author/B08ZT331LY/allbooks) |
+| **Elsewhere** | [all projects](https://drsamonline.github.io/) |
+| **Email** | [sohilmomin2000@gmail.com](mailto:sohilmomin2000@gmail.com) — bugs, corrections, requests |
+
 ## License
 
 PolyForm Noncommercial 1.0.0 — see [LICENSE](LICENSE). Music you generate with it is yours.
