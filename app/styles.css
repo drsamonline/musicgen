@@ -1033,3 +1033,10 @@ a:focus-visible,
   .drum-steps { grid-template-columns: repeat(16, 24px); overflow-x: auto; padding-bottom: 4px; }
   .drum-step { height: 24px; }
 }
+
+/* ---- a11y: button contrast (measured, WCAG AA) ---------------------------
+   The pressed step and the play button took the accent as a surface and kept a
+   label written for a lighter one. Pairs measured on the rendered page. */
+.groove-step[aria-pressed="true"]{color:#ffffff!important}          /* 3.39 -> 5.5 on #3d5ce0 */
+[data-theme="dark"] .groove-step[aria-pressed="true"]{color:#0c1220!important} /* 2.22 -> 7.5 on #8b9dff */
+button[style*="--accent"], .transport button{color:#ffffff!important}
