@@ -16,10 +16,10 @@
     },
     "docs/play/index.html": {
       "sha": "b2c1499f3c13e947419a10686351301a2faaf5be",
-      "producer": "bootstrap@2026-11-04",
-      "class": "generated",
-      "at": "2026-11-04T20:06:18Z"
+      "producer": "human",
+      "class": "hand",
+      "at": "2026-11-14T18:06:46Z"
     }
   },
-  "updated": "2026-11-10T13:43:06Z"
+  "updated": "2026-11-14T18:06:46Z"
 }
