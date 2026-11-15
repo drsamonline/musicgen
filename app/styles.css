@@ -1040,3 +1040,12 @@ a:focus-visible,
 .groove-step[aria-pressed="true"]{color:#ffffff!important}          /* 3.39 -> 5.5 on #3d5ce0 */
 [data-theme="dark"] .groove-step[aria-pressed="true"]{color:#0c1220!important} /* 2.22 -> 7.5 on #8b9dff */
 button[style*="--accent"], .transport button{color:#ffffff!important}
+/* The row's surface is #f2f4fa in the light theme, where a white label is 1.1:1. */
+[data-theme="light"] .transport button:not(#play){color:#0c1220!important}
+
+/* ---- a11y: the play button is driven by two tokens, so fix the tokens -----
+   --play-bg is a gradient and --play-fg its label. Light: white on the #4b6bf5
+   stop was 4.45:1. Dark: white on rgba(139,157,255,.95) was 2.51:1, and a
+   #080a14 label already existed in the file but was not winning. */
+[data-theme="light"]{--play-bg:linear-gradient(160deg,#3d5ce0,#2f49b8);--play-fg:#ffffff}
+[data-theme="dark"] #play{color:#080a14!important}
