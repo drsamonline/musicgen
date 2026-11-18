@@ -240,20 +240,6 @@ python3 -m http.server 8080
 <span class="c"># → http://localhost:8080</span></pre>
   </section>
 
-<!-- support:sweep -->
-<section id="support" style="max-width:960px;margin:0 auto;padding:40px 20px;border-top:1px solid rgba(128,128,128,.25)">
-  <h2 style="margin:0 0 10px">Support the work</h2>
-  <p style="margin:0 0 12px;max-width:60ch">One person's work: no company, no ads, no tracking, no paid
-  tier. If this saved you an afternoon, a contribution keeps the next one coming — any amount, or none.</p>
-  <p style="margin:0;line-height:1.9">
-    <b>UPI</b> drsohilboi@ybl &nbsp;·&nbsp;
-    <a href="https://ko-fi.com/matneo" rel="noopener noreferrer">Ko-fi</a> &nbsp;·&nbsp;
-    <a href="https://paypal.me/drsohilmomin?locale.x=en_GB&amp;country.x=IN" rel="noopener noreferrer">PayPal</a> &nbsp;·&nbsp;
-    <a href="https://www.amazon.com/stores/author/B08ZT331LY/allbooks" rel="noopener noreferrer">Books</a> &nbsp;·&nbsp;
-    <a href="https://drsamonline.github.io/" rel="noopener noreferrer">All projects</a> &nbsp;·&nbsp;
-    <a href="mailto:sohilmomin2000@gmail.com">Email</a>
-  </p>
-</section>
 
 </main>
 
@@ -304,7 +290,12 @@ python3 -m http.server 8080
   .support-qr img{width:132px;height:132px;display:block;background:#fff;padding:.35rem;
                   border:1px solid var(--s-line);border-radius:.4rem;image-rendering:pixelated}
   .support-qr small{display:block;color:var(--s-muted);font-size:.8rem;max-width:11rem;line-height:1.4}
-  .support-foot{margin:1.2rem 0 0;font-size:.8rem;color:var(--s-muted)}
+  /* .support-foot is a paragraph inside <footer class="foot">, and landing.css's
+     `.foot p` (0,1,1) outranks a bare `.support-foot` (0,1,0) - so the panel's own
+     muted brown never applied and the foot rendered in the footer's grey #99a1a0
+     on the panel's paper #f7f2e9: 2.4:1, axe serious. Every other paragraph in
+     this panel already carries a two-part selector; this one was the exception. */
+  .support p.support-foot{margin:1.2rem 0 0;font-size:.8rem;color:var(--s-muted)}
   @media (prefers-reduced-motion:no-preference){.support-card{transition:border-color .15s ease}}
   .support-card:target,.support-card:focus-within{border-color:var(--s-accent)}
 
